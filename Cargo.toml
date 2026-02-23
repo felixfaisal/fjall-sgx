@@ -2,9 +2,11 @@
 resolver = "2"
 members = [
     "app",
-    "enclave", 
+    "enclave",
+    "engine",
     "lsm-sgx",
-    "sgx_edl"
+    "sgx_edl",
+    "storage"
 ]
 
 [workspace.package]

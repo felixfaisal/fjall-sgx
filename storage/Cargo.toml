@@ -1,0 +1,9 @@
+[package]
+name = "fjall-sgx-storage"
+description = "Storage abstraction layer for fjall-sgx"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lsm-sgx = { path = "../lsm-sgx" }

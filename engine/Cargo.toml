@@ -1,0 +1,10 @@
+[package]
+name = "fjall-sgx"
+description = "Encrypted LSM-tree key-value store for Intel SGX enclaves, inspired by Fjall"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lsm-sgx = { path = "../lsm-sgx" }
+fjall-sgx-storage = { path = "../storage" }
