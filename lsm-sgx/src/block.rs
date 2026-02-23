@@ -1,11 +1,11 @@
 // lsm-sgx/src/block.rs
 //
 // Block format for SSTable data blocks.
-
+//
 // Inspired by Fjall v3's block format: KV pairs packed together with
 // restart points for binary search. Simplified from Fjall (no prefix
 // truncation, no hash index) but same fundamental structure.
-
+//
 // Block layout (serialized):
 // ┌──────────────────────────────────────────────────┐
 // │ Entry 0 (full key)              ← restart point  │
@@ -21,13 +21,13 @@
 // │ num_entries: u32 BE                              │
 // │ checksum: [u8; 16] (XXH3-128 of everything above)│
 // └──────────────────────────────────────────────────┘
-
+//
 // Restart points are placed every `restart_interval` entries.
 // They store the full key (no prefix truncation in our simplified version).
 // This allows binary search: find the restart point whose key <= target,
 // then linear scan within that interval.
 
-use crate::types::{InternalEntry, InternalKey, UserKey};
+use crate::types::{InternalEntry, InternalKey};
 
 #[cfg(feature = "std")]
 use std::vec::Vec;

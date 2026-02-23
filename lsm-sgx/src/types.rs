@@ -323,11 +323,7 @@ mod tests {
 
     #[test]
     fn test_internal_entry_encode_decode_roundtrip() {
-        let entry = InternalEntry::put(
-            b"my_key".to_vec(),
-            100,
-            b"hello world".to_vec(),
-        );
+        let entry = InternalEntry::put(b"my_key".to_vec(), 100, b"hello world".to_vec());
         let mut buf = Vec::new();
         entry.encode(&mut buf);
 
@@ -353,11 +349,7 @@ mod tests {
 
     #[test]
     fn test_encoded_size_matches_actual() {
-        let entry = InternalEntry::put(
-            b"key123".to_vec(),
-            999,
-            b"value_data".to_vec(),
-        );
+        let entry = InternalEntry::put(b"key123".to_vec(), 999, b"value_data".to_vec());
         let mut buf = Vec::new();
         entry.encode(&mut buf);
         assert_eq!(buf.len(), entry.encoded_size());

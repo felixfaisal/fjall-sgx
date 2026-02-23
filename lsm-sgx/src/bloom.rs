@@ -29,7 +29,7 @@ const NUM_HASHES: u32 = 7;
 ///
 /// Uses double hashing: h(i) = h1 + i * h2
 /// where h1 and h2 are derived from a single hash of the key.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BloomFilter {
     /// The bit array, stored as bytes
     bits: Vec<u8>,
