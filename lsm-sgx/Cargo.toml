@@ -1,0 +1,12 @@
+[package]
+name = "lsm-sgx"
+description = "SGX-aware LSM-tree implementation inspired by Fjall - no_std compatible"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]
