@@ -33,6 +33,13 @@ extern "C" {
     ) -> SgxStatus;
 }
 
+#[no_mangle]
+pub extern "C" fn ocall_say_something(some_string: *const u8, len: usize) {
+    let slice = unsafe { std::slice::from_raw_parts(some_string, len) };
+    let msg = std::str::from_utf8(slice).unwrap_or("<invalid utf8>");
+    println!("[Host] Enclave says: {}", msg);
+}
+
 fn main() {
     let enclave = match SgxEnclave::create(ENCLAVE_FILE, true) {
         Ok(enclave) => {

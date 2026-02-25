@@ -29,6 +29,10 @@ use std::slice;
 use std::string::String;
 use std::vec::Vec;
 
+extern "C" {
+    fn ocall_say_something(ret: *mut i32, some_string: *const u8, len: usize) -> u32;
+}
+
 /// # Safety
 #[no_mangle]
 pub unsafe extern "C" fn say_something(some_string: *const u8, some_len: usize) -> SgxStatus {
