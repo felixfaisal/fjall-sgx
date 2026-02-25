@@ -60,5 +60,14 @@ pub unsafe extern "C" fn say_something(some_string: *const u8, some_len: usize) 
     // Ocall to normal world for output
     println!("{}", &hello_string);
 
+    let msg = "hello from enclave";
+    let mut retval: i32 = 0;
+
+    let status = unsafe { ocall_say_something(&mut retval as *mut i32, msg.as_ptr(), msg.len()) };
+
+    if status != 0 {
+        return -1; // SGX error
+    }
+
     SgxStatus::Success
 }
