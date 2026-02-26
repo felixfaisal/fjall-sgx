@@ -23,8 +23,9 @@ fn main() {
 
     let sdk_dir = env::var("SGX_SDK").unwrap_or_else(|_| "/opt/intel/sgxsdk".to_string());
     let mode = env::var("SGX_MODE").unwrap_or_else(|_| "HW".to_string());
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
 
-    println!("cargo:rustc-link-search=native=../lib");
+    println!("cargo:rustc-link-search=native={}/../lib", manifest_dir);
     println!("cargo:rustc-link-lib=static=enclave_u");
 
     println!("cargo:rustc-link-search=native={}/lib64", sdk_dir);
