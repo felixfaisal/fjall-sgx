@@ -41,8 +41,8 @@ extern "C" {
 // }
 
 // We add empty ocall to test ocall functionality
-// #[no_mangle]
-// pub extern "C" fn ocall_empty() {}
+#[no_mangle]
+pub extern "C" fn ocall_empty() {}
 
 fn main() {
     let enclave = match SgxEnclave::create(ENCLAVE_FILE, true) {
