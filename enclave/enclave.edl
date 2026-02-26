@@ -22,8 +22,4 @@ enclave {
     trusted {
         public sgx_status_t say_something([in, size=len] const uint8_t* some_string, size_t len);
     };
-
-    untrusted {
-         void ocall_empty(void);
-    };
 };

@@ -36,9 +36,9 @@ use sgx_types::*;
 // }
 
 // Looks like all ocalls must return sgx_status_t response
-extern "C" {
-    pub fn ocall_empty() -> sgx_status_t;
-}
+// extern "C" {
+//     pub fn ocall_empty() -> sgx_status_t;
+// }
 
 /// # Safety
 #[no_mangle]
