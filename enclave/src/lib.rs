@@ -29,8 +29,15 @@ use std::slice;
 use std::string::String;
 use std::vec::Vec;
 
+use sgx_types::*;
+
+// extern "C" {
+//     fn ocall_say_something(ret: *mut i32, some_string: *const u8, len: usize) -> u32;
+// }
+
+// Looks like all ocalls must return sgx_status_t response
 extern "C" {
-    fn ocall_say_something(ret: *mut i32, some_string: *const u8, len: usize) -> u32;
+    pub fn ocall_empty() -> sgx_status_t;
 }
 
 /// # Safety
@@ -64,10 +71,6 @@ pub unsafe extern "C" fn say_something(some_string: *const u8, some_len: usize) 
     let mut retval: i32 = 0;
 
     let status = unsafe { ocall_say_something(&mut retval as *mut i32, msg.as_ptr(), msg.len()) };
-
-    if status != 0 {
-        return -1; // SGX error
-    }
 
     SgxStatus::Success
 }
