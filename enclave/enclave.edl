@@ -18,8 +18,6 @@
 enclave {
     from "sgx_stdio.edl" import *;
     from "sgx_tstd.edl" import *;
-    from "sgx_tstdc.edl" import *;
-
 
     trusted {
         public sgx_status_t say_something([in, size=len] const uint8_t* some_string, size_t len);
