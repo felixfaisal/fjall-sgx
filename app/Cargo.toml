@@ -24,3 +24,5 @@ edition = "2021"
 [dependencies]
 sgx_types = { git = "https://github.com/apache/incubator-teaclave-sgx-sdk.git" }
 sgx_urts = { git = "https://github.com/apache/incubator-teaclave-sgx-sdk.git" }
+
+[workspace]
