@@ -10,6 +10,4 @@ default = ["std"]
 std = []
 
 [dependencies]
-
-[target.'cfg(not(target_vendor = "teaclave"))'.dependencies]
-sgx_tstd = { git = "https://github.com/apache/incubator-teaclave-sgx-sdk.git" }
+sgx_tstd = { workspace = true, optional = true }

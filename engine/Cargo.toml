@@ -5,6 +5,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = ["std"]
+std = ["lsm-sgx/std", "fjall-sgx-storage/std"]
+
 [dependencies]
-lsm-sgx = { path = "../lsm-sgx" }
-fjall-sgx-storage = { path = "../storage" }
+lsm-sgx = { path = "../lsm-sgx", default-features = false }
+fjall-sgx-storage = { path = "../storage", default-features = false }
+sgx_tstd = { workspace = true, optional = true }
+
+[dev-dependencies]
+fjall-sgx-storage = { path = "../storage", default-features = false, features = ["implementations"] }

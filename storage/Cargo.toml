@@ -5,5 +5,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = ["std", "implementations"]
+std = ["lsm-sgx/std"]
+implementations = []  # Enable concrete storage implementations
+
 [dependencies]
-lsm-sgx = { path = "../lsm-sgx" }
+lsm-sgx = { path = "../lsm-sgx", default-features = false }
+sgx_tstd = { workspace = true, optional = true }

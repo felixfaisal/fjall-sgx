@@ -32,5 +32,7 @@ default = []
 sgx_types = { git = "https://github.com/apache/incubator-teaclave-sgx-sdk.git" }
 sgx_tstd = { git = "https://github.com/apache/incubator-teaclave-sgx-sdk.git" }
 lsm-sgx = { path = "../lsm-sgx", default-features = false }
+fjall-sgx = { path = "../engine", default-features = false }
+fjall-sgx-storage = { path = "../storage", default-features = false }
 
 [workspace]
