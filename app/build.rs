@@ -28,6 +28,8 @@ fn main() {
     println!("cargo:rustc-link-search=native={}/../lib", manifest_dir);
     println!("cargo:rustc-link-lib=static=enclave_u");
 
+    println!("cargo:rustc-link-arg=-Wl,--whole-archive");
+    println!("cargo:rustc-link-arg=-Wl,--no-whole-archive");
     println!("cargo:rustc-link-search=native={}/lib64", sdk_dir);
     match mode.as_ref() {
         "SIM" | "SW" => println!("cargo:rustc-link-lib=dylib=sgx_urts_sim"),
