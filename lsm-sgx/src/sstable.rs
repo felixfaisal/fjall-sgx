@@ -40,12 +40,7 @@ use crate::block::{
 };
 use crate::bloom::{BloomFilter, DEFAULT_BITS_PER_KEY};
 use crate::types::{InternalEntry, InternalKey, SeqNo, UserKey};
-
-#[cfg(feature = "std")]
 use std::vec::Vec;
-
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 // ─── Constants ──────────────────────────────────────────────────
 

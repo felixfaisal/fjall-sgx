@@ -28,12 +28,7 @@
 // then linear scan within that interval.
 
 use crate::types::{InternalEntry, InternalKey};
-
-#[cfg(feature = "std")]
 use std::vec::Vec;
-
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 /// Default number of entries between restart points.
 /// Fjall v3 uses 16 by default.

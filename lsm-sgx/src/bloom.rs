@@ -12,11 +12,7 @@
 // Default: ~10 bits per key → ~1% false positive rate.
 // This matches what Fjall and RocksDB use by default.
 
-#[cfg(feature = "std")]
 use std::vec::Vec;
-
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 /// Default bits per key. 10 bits ≈ 1% FPR.
 pub const DEFAULT_BITS_PER_KEY: usize = 10;

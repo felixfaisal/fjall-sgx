@@ -10,7 +10,8 @@
 // This means for the same user_key, the newest version comes first,
 // so point reads can stop at the first match.
 
-use core::cmp::Ordering;
+use std::cmp::Ordering;
+use std::vec::Vec;
 
 /// Monotonically increasing sequence number.
 /// Each write operation (or batch) gets a unique seqno.
@@ -42,19 +43,11 @@ impl ValueType {
 /// A user-provided key. Just raw bytes — the LSM-tree is agnostic
 /// about key structure.
 ///
-/// In std mode this is Vec<u8>, in no_std mode it could be adapted.
-#[cfg(feature = "std")]
-pub type UserKey = Vec<u8>;
-
-#[cfg(not(feature = "std"))]
-pub type UserKey = alloc::vec::Vec<u8>;
+/// Uses std::vec::Vec which is aliased to sgx_tstd in SGX environments.
+pub type UserKey = std::vec::Vec<u8>;
 
 /// A user-provided value. Also just raw bytes.
-#[cfg(feature = "std")]
-pub type UserValue = Vec<u8>;
-
-#[cfg(not(feature = "std"))]
-pub type UserValue = alloc::vec::Vec<u8>;
+pub type UserValue = std::vec::Vec<u8>;
 
 /// The internal key used throughout the LSM-tree.
 ///

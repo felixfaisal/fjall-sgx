@@ -1,6 +1,6 @@
 [package]
 name = "lsm-sgx"
-description = "SGX-aware LSM-tree implementation inspired by Fjall - no_std compatible"
+description = "SGX-aware LSM-tree implementation inspired by Fjall - SGX/std compatible"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,3 +10,6 @@ default = ["std"]
 std = []
 
 [dependencies]
+
+[target.'cfg(not(target_vendor = "teaclave"))'.dependencies]
+sgx_tstd = { git = "https://github.com/apache/incubator-teaclave-sgx-sdk.git" }
