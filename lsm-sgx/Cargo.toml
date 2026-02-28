@@ -9,5 +9,5 @@ license.workspace = true
 default = ["std"]
 std = []
 
-[dependencies]
-sgx_tstd = { workspace = true, optional = true }
+[target.'cfg(not(target_vendor = "teaclave"))'.dependencies]
+sgx_tstd = { workspace = true }

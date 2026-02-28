@@ -20,6 +20,7 @@
 use fjall_sgx_storage::{FileId, StorageError, StorageReader, StorageWriter};
 use lsm_sgx::sstable::{SstError, SstOptions, SstReader, SstWriter};
 use lsm_sgx::types::{InternalEntry, SeqNo, UserKey};
+use std::vec::Vec;
 
 // ─── Errors ─────────────────────────────────────────────────────
 

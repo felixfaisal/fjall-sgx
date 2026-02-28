@@ -32,6 +32,7 @@
 use fjall_sgx_storage::{FileId, StorageReader, StorageWriter};
 use lsm_sgx::sstable::SstOptions;
 use lsm_sgx::types::{InternalEntry, ValueType};
+use std::vec::Vec;
 
 use crate::sst_file::{self, SstFileError, SstFileMeta};
 

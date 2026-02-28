@@ -16,6 +16,9 @@
 //   StdStorage wraps std::fs behind the same trait
 //   MemoryStorage keeps everything in-memory (fastest for unit tests)
 
+use std::string::String;
+use std::vec::Vec;
+
 /// Opaque file identifier.
 ///
 /// The engine works exclusively with FileIds. The mapping from FileId

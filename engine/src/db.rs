@@ -21,6 +21,7 @@
 use fjall_sgx_storage::{StorageReader, StorageWriter};
 use lsm_sgx::sstable::SstOptions;
 use lsm_sgx::types::{InternalEntry, SeqNo, ValueType};
+use std::vec::Vec;
 
 use crate::compaction;
 use crate::flush;

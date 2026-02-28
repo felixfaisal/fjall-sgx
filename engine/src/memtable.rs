@@ -20,6 +20,7 @@
 // data (key + value + overhead). This is used to decide when to flush.
 
 use std::collections::BTreeMap;
+use std::vec::Vec;
 
 use lsm_sgx::types::{InternalEntry, InternalKey, SeqNo, UserKey, UserValue, ValueType};
 
