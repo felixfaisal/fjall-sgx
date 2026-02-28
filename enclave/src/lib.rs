@@ -31,6 +31,7 @@ use std::vec::Vec;
 
 use fjall_sgx::db::{Db, DbConfig};
 use fjall_sgx_storage::{FileId, StorageError, StorageReader, StorageWriter};
+use log::{debug, error, info, trace};
 
 use sgx_types::*;
 use std::sync::Mutex;
@@ -205,6 +206,7 @@ impl StorageWriter for SgxOcallStorage {
 /// This should be called once before any put/get operations
 #[no_mangle]
 pub extern "C" fn db_init() -> SgxStatus {
+    env_logger::init();
     let ocall_storage = SgxOcallStorage::new();
     let db = Db::open(ocall_storage, DbConfig::default());
 
@@ -214,7 +216,7 @@ pub extern "C" fn db_init() -> SgxStatus {
     };
 
     *db_guard = Some(db);
-    println!("[Enclave] Database initialized successfully");
+    info!("[Enclave] Database initialized successfully");
 
     SgxStatus::Success
 }
@@ -227,6 +229,7 @@ pub unsafe extern "C" fn db_put(
     value: *const u8,
     value_len: usize,
 ) -> SgxStatus {
+    env_logger::init();
     // Convert raw pointers to slices
     let key_slice = slice::from_raw_parts(key, key_len);
     let value_slice = slice::from_raw_parts(value, value_len);
@@ -240,7 +243,7 @@ pub unsafe extern "C" fn db_put(
     let db = match db_guard.as_mut() {
         Some(db) => db,
         None => {
-            println!("[Enclave] Error: DB not initialized. Call db_init() first.");
+            error!("[Enclave] Error: DB not initialized. Call db_init() first.");
             return SgxStatus::InvalidParameter;
         }
     };
@@ -248,14 +251,14 @@ pub unsafe extern "C" fn db_put(
     // Perform the put operation
     match db.put(key_slice, value_slice) {
         Ok(_) => {
-            println!(
+            info!(
                 "[Enclave] Put success: key_len={}, value_len={}",
                 key_len, value_len
             );
             SgxStatus::Success
         }
         Err(e) => {
-            println!("[Enclave] Put failed: {:?}", e);
+            error!("[Enclave] Put failed: {:?}", e);
             SgxStatus::Unexpected
         }
     }
@@ -271,6 +274,7 @@ pub unsafe extern "C" fn db_get(
     buf_len: usize,
     out_len: *mut usize,
 ) -> SgxStatus {
+    env_logger::init();
     // Convert raw pointers to slices
     let key_slice = slice::from_raw_parts(key, key_len);
 
@@ -283,7 +287,7 @@ pub unsafe extern "C" fn db_get(
     let db = match db_guard.as_ref() {
         Some(db) => db,
         None => {
-            println!("[Enclave] Error: DB not initialized. Call db_init() first.");
+            error!("[Enclave] Error: DB not initialized. Call db_init() first.");
             return SgxStatus::InvalidParameter;
         }
     };
@@ -300,7 +304,7 @@ pub unsafe extern "C" fn db_get(
             *out_len = value.len();
 
             if value.len() > buf_len {
-                println!(
+                info!(
                     "[Enclave] Get success but buffer too small: value_len={}, buf_len={}",
                     value.len(),
                     buf_len
@@ -308,7 +312,7 @@ pub unsafe extern "C" fn db_get(
                 return SgxStatus::InvalidParameter;
             }
 
-            println!(
+            info!(
                 "[Enclave] Get success: key_len={}, value_len={}",
                 key_len,
                 value.len()
@@ -316,12 +320,12 @@ pub unsafe extern "C" fn db_get(
             SgxStatus::Success
         }
         Ok(None) => {
-            println!("[Enclave] Get: key not found");
+            warn!("[Enclave] Get: key not found");
             *out_len = 0;
             SgxStatus::Success
         }
         Err(e) => {
-            println!("[Enclave] Get failed: {:?}", e);
+            error!("[Enclave] Get failed: {:?}", e);
             SgxStatus::Unexpected
         }
     }

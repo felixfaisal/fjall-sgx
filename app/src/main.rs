@@ -22,6 +22,8 @@ use sgx_types::error::SgxStatus;
 use sgx_types::types::*;
 use sgx_urts::enclave::SgxEnclave;
 
+use log::{debug, error, info, trace};
+
 static ENCLAVE_FILE: &str = "enclave.signed.so";
 
 extern "C" {
@@ -141,22 +143,23 @@ pub extern "C" fn ocall_file_exists(file_id: u64, exists: *mut u8) -> SgxStatus 
 }
 
 fn main() {
+    env_logger::init();
     let enclave = match SgxEnclave::create(ENCLAVE_FILE, true) {
         Ok(enclave) => {
-            println!("[+] Init Enclave Successful {}!", enclave.eid());
+            info!("[+] Init Enclave Successful {}!", enclave.eid());
             enclave
         }
         Err(err) => {
-            println!("[-] Init Enclave Failed {}!", err.as_str());
+            error!("[-] Init Enclave Failed {}!", err.as_str());
             return;
         }
     };
 
     // Test database operations
-    println!("\n=== Testing Database Operations ===");
+    info!("\n=== Testing Database Operations ===");
 
     // 1. Initialize the database
-    println!("\n[Host] Step 1: Initializing database...");
+    info!(target: "Host", "Step 1: Initializing database...");
     let mut retval = SgxStatus::Success;
     let result = unsafe { db_init(enclave.eid(), &mut retval) };
 
@@ -172,7 +175,7 @@ fn main() {
     }
 
     // 2. Put some key-value pairs
-    println!("\n[Host] Step 2: Putting key-value pairs...");
+    info!("\n[Host] Step 2: Putting key-value pairs...");
 
     let test_data = vec![
         ("hello", "world"),
@@ -196,16 +199,16 @@ fn main() {
 
         match result {
             SgxStatus::Success => {
-                println!("[Host] ✓ Put success: '{}' => '{}'", key, value);
+                info!("[Host] ✓ Put success: '{}' => '{}'", key, value);
             }
             _ => {
-                println!("[Host] ✗ Put failed for key '{}': {}", key, result.as_str());
+                error!("[Host] ✗ Put failed for key '{}': {}", key, result.as_str());
             }
         }
     }
 
     // 3. Get the values back
-    println!("\n[Host] Step 3: Getting values back...");
+    info!("\n[Host] Step 3: Getting values back...");
 
     for (key, expected_value) in &test_data {
         let mut retval = SgxStatus::Success;
@@ -227,16 +230,16 @@ fn main() {
         match result {
             SgxStatus::Success => {
                 if out_len == 0 {
-                    println!("[Host] ✗ Key '{}' not found!", key);
+                    warn!("[Host] ✗ Key '{}' not found!", key);
                 } else {
                     let retrieved_value = String::from_utf8_lossy(&value_buf[..out_len]);
                     if retrieved_value == *expected_value {
-                        println!(
+                        info!(
                             "[Host] ✓ Get success: '{}' => '{}' (matches!)",
                             key, retrieved_value
                         );
                     } else {
-                        println!(
+                        error!(
                             "[Host] ✗ Get mismatch: '{}' => '{}' (expected '{}')",
                             key, retrieved_value, expected_value
                         );
@@ -244,13 +247,13 @@ fn main() {
                 }
             }
             _ => {
-                println!("[Host] ✗ Get failed for key '{}': {}", key, result.as_str());
+                warn!("[Host] ✗ Get failed for key '{}': {}", key, result.as_str());
             }
         }
     }
 
     // 4. Test getting a non-existent key
-    println!("\n[Host] Step 4: Testing non-existent key...");
+    info!("\n[Host] Step 4: Testing non-existent key...");
     let nonexistent_key = "does_not_exist";
     let mut retval = SgxStatus::Success;
     let mut value_buf = vec![0u8; 1024];
@@ -271,18 +274,18 @@ fn main() {
     match result {
         SgxStatus::Success => {
             if out_len == 0 {
-                println!(
+                info!(
                     "[Host] ✓ Correctly returned not found for key '{}'",
                     nonexistent_key
                 );
             } else {
-                println!("[Host] ✗ Unexpectedly found value for non-existent key");
+                error!("[Host] ✗ Unexpectedly found value for non-existent key");
             }
         }
         _ => {
-            println!("[Host] ✗ Get failed: {}", result.as_str());
+            error!("[Host] ✗ Get failed: {}", result.as_str());
         }
     }
 
-    println!("\n=== All tests completed ===");
+    info!("\n=== All tests completed ===");
 }
