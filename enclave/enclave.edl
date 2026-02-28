@@ -25,5 +25,25 @@ enclave {
 
     untrusted {
         void ocall_empty(void);
+
+        sgx_status_t ocall_create_file([out] uint64_t* file_id);
+        sgx_status_t ocall_append(
+            uint64_t file_id,
+            [in, size=len] const uint8_t* data,
+            size_t len,
+            [out] uint64_t* bytes_written
+        );
+        sgx_status_t ocall_read_at(
+            uint64_t file_id,
+            uint64_t offset,
+            [out, size=buf_len] uint8_t* buf,
+            size_t buf_len,
+            [out] size_t* bytes_read
+        );
+        sgx_status_t ocall_file_size(uint64_t file_id, [out] uint64_t* size);
+        sgx_status_t ocall_sync(uint64_t file_id);
+        sgx_status_t ocall_close_file(uint64_t file_id);
+        sgx_status_t ocall_delete_file(uint64_t file_id);
+        sgx_status_t ocall_file_exists(uint64_t file_id, [out] uint8_t* exists);
     };
 };

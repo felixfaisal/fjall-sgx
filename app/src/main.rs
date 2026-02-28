@@ -40,9 +40,95 @@ extern "C" {
 //     println!("[Host] Enclave says: {}", msg);
 // }
 
-// We add empty ocall to test ocall functionality
+// ─── OCALL Implementations ──────────────────────────────────────────
+
+/// Empty OCALL for testing
 #[no_mangle]
 pub extern "C" fn ocall_empty() {}
+
+/// Create a new file and return its file_id
+#[no_mangle]
+pub extern "C" fn ocall_create_file(file_id: *mut u64) -> SgxStatus {
+    // TODO: Implement file creation logic
+    // For now, return a dummy file_id
+    unsafe {
+        *file_id = 0;
+    }
+    SgxStatus::Success
+}
+
+/// Append data to a file
+#[no_mangle]
+pub extern "C" fn ocall_append(
+    file_id: u64,
+    data: *const u8,
+    len: usize,
+    bytes_written: *mut u64,
+) -> SgxStatus {
+    // TODO: Implement file append logic
+    // let slice = unsafe { std::slice::from_raw_parts(data, len) };
+    unsafe {
+        *bytes_written = len as u64;
+    }
+    SgxStatus::Success
+}
+
+/// Read data from a file at a specific offset
+#[no_mangle]
+pub extern "C" fn ocall_read_at(
+    file_id: u64,
+    offset: u64,
+    buf: *mut u8,
+    buf_len: usize,
+    bytes_read: *mut usize,
+) -> SgxStatus {
+    // TODO: Implement file read logic
+    unsafe {
+        *bytes_read = 0;
+    }
+    SgxStatus::Success
+}
+
+/// Get the size of a file
+#[no_mangle]
+pub extern "C" fn ocall_file_size(file_id: u64, size: *mut u64) -> SgxStatus {
+    // TODO: Implement file size query
+    unsafe {
+        *size = 0;
+    }
+    SgxStatus::Success
+}
+
+/// Sync/flush a file to disk
+#[no_mangle]
+pub extern "C" fn ocall_sync(file_id: u64) -> SgxStatus {
+    // TODO: Implement file sync logic
+    SgxStatus::Success
+}
+
+/// Close a file
+#[no_mangle]
+pub extern "C" fn ocall_close_file(file_id: u64) -> SgxStatus {
+    // TODO: Implement file close logic
+    SgxStatus::Success
+}
+
+/// Delete a file
+#[no_mangle]
+pub extern "C" fn ocall_delete_file(file_id: u64) -> SgxStatus {
+    // TODO: Implement file deletion logic
+    SgxStatus::Success
+}
+
+/// Check if a file exists
+#[no_mangle]
+pub extern "C" fn ocall_file_exists(file_id: u64, exists: *mut u8) -> SgxStatus {
+    // TODO: Implement file existence check
+    unsafe {
+        *exists = 0; // 0 = does not exist, 1 = exists
+    }
+    SgxStatus::Success
+}
 
 fn main() {
     let enclave = match SgxEnclave::create(ENCLAVE_FILE, true) {
