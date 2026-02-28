@@ -54,18 +54,7 @@ extern "C" {
     ) -> SgxStatus;
 }
 
-// #[no_mangle]
-// pub extern "C" fn ocall_say_something(some_string: *const u8, len: usize) {
-//     let slice = unsafe { std::slice::from_raw_parts(some_string, len) };
-//     let msg = std::str::from_utf8(slice).unwrap_or("<invalid utf8>");
-//     println!("[Host] Enclave says: {}", msg);
-// }
-
 // ─── OCALL Implementations ──────────────────────────────────────────
-
-/// Empty OCALL for testing
-#[no_mangle]
-pub extern "C" fn ocall_empty() {}
 
 /// Create a new file and return its file_id
 #[no_mangle]
@@ -162,24 +151,6 @@ fn main() {
             return;
         }
     };
-
-    // Test the original say_something function
-    println!("\n=== Testing say_something ===");
-    let input_string = String::from("This is a normal world string passed into Enclave!\n");
-    let mut retval = SgxStatus::Success;
-
-    let result = unsafe {
-        say_something(
-            enclave.eid(),
-            &mut retval,
-            input_string.as_ptr() as *const u8,
-            input_string.len(),
-        )
-    };
-    match result {
-        SgxStatus::Success => println!("[+] say_something ECall Success"),
-        _ => println!("[-] say_something ECall Failed: {}", result.as_str()),
-    }
 
     // Test database operations
     println!("\n=== Testing Database Operations ===");

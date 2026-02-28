@@ -20,9 +20,6 @@ enclave {
     from "sgx_tstd.edl" import *;
 
     trusted {
-        public sgx_status_t say_something([in, size=len] const uint8_t* some_string, size_t len);
-
-        // Database operations
         public sgx_status_t db_init(void);
         public sgx_status_t db_put(
             [in, size=key_len] const uint8_t* key,
@@ -40,8 +37,6 @@ enclave {
     };
 
     untrusted {
-        void ocall_empty(void);
-
         sgx_status_t ocall_create_file([out] uint64_t* file_id);
         sgx_status_t ocall_append(
             uint64_t file_id,
