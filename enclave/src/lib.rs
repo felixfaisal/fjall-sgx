@@ -33,10 +33,10 @@ use fjall_sgx::db::{Db, DbConfig};
 use fjall_sgx_storage::{FileId, StorageError, StorageReader, StorageWriter};
 
 use sgx_types::*;
-use std::sync::SgxMutex;
+use std::sync::Mutex;
 
 // Global DB instance protected by a mutex
-static DB_INSTANCE: SgxMutex<Option<Db<SgxOcallStorage>>> = SgxMutex::new(None);
+static DB_INSTANCE: Mutex<Option<Db<SgxOcallStorage>>> = Mutex::new(None);
 
 // Looks like all ocalls must return sgx_status_t response
 extern "C" {
