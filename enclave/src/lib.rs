@@ -29,9 +29,14 @@ use std::slice;
 use std::string::String;
 use std::vec::Vec;
 
+use fjall_sgx::db::{Db, DbConfig};
 use fjall_sgx_storage::{FileId, StorageError, StorageReader, StorageWriter};
 
 use sgx_types::*;
+use std::sync::SgxMutex;
+
+// Global DB instance protected by a mutex
+static DB_INSTANCE: SgxMutex<Option<Db<SgxOcallStorage>>> = SgxMutex::new(None);
 
 // Looks like all ocalls must return sgx_status_t response
 extern "C" {
@@ -191,6 +196,134 @@ impl StorageWriter for SgxOcallStorage {
         }
 
         Ok(())
+    }
+}
+
+// ─── Database API ───────────────────────────────────────────────────
+
+/// Initialize the database
+/// This should be called once before any put/get operations
+#[no_mangle]
+pub extern "C" fn db_init() -> SgxStatus {
+    let ocall_storage = SgxOcallStorage::new();
+    let db = Db::open(ocall_storage, DbConfig::default());
+
+    let mut db_guard = match DB_INSTANCE.lock() {
+        Ok(guard) => guard,
+        Err(_) => return SgxStatus::Unexpected,
+    };
+
+    *db_guard = Some(db);
+    println!("[Enclave] Database initialized successfully");
+
+    SgxStatus::Success
+}
+
+/// Put a key-value pair into the database
+#[no_mangle]
+pub unsafe extern "C" fn db_put(
+    key: *const u8,
+    key_len: usize,
+    value: *const u8,
+    value_len: usize,
+) -> SgxStatus {
+    // Convert raw pointers to slices
+    let key_slice = slice::from_raw_parts(key, key_len);
+    let value_slice = slice::from_raw_parts(value, value_len);
+
+    // Get DB instance
+    let mut db_guard = match DB_INSTANCE.lock() {
+        Ok(guard) => guard,
+        Err(_) => return SgxStatus::Unexpected,
+    };
+
+    let db = match db_guard.as_mut() {
+        Some(db) => db,
+        None => {
+            println!("[Enclave] Error: DB not initialized. Call db_init() first.");
+            return SgxStatus::InvalidParameter;
+        }
+    };
+
+    // Perform the put operation
+    match db.put(key_slice, value_slice) {
+        Ok(_) => {
+            println!(
+                "[Enclave] Put success: key_len={}, value_len={}",
+                key_len, value_len
+            );
+            SgxStatus::Success
+        }
+        Err(e) => {
+            println!("[Enclave] Put failed: {:?}", e);
+            SgxStatus::Unexpected
+        }
+    }
+}
+
+/// Get a value from the database by key
+/// Returns the value length in out_len, or 0 if not found
+#[no_mangle]
+pub unsafe extern "C" fn db_get(
+    key: *const u8,
+    key_len: usize,
+    value_buf: *mut u8,
+    buf_len: usize,
+    out_len: *mut usize,
+) -> SgxStatus {
+    // Convert raw pointers to slices
+    let key_slice = slice::from_raw_parts(key, key_len);
+
+    // Get DB instance
+    let db_guard = match DB_INSTANCE.lock() {
+        Ok(guard) => guard,
+        Err(_) => return SgxStatus::Unexpected,
+    };
+
+    let db = match db_guard.as_ref() {
+        Some(db) => db,
+        None => {
+            println!("[Enclave] Error: DB not initialized. Call db_init() first.");
+            return SgxStatus::InvalidParameter;
+        }
+    };
+
+    // Perform the get operation
+    match db.get(key_slice) {
+        Ok(Some(value)) => {
+            let copy_len = std::cmp::min(value.len(), buf_len);
+
+            // Copy value to output buffer
+            let out_slice = slice::from_raw_parts_mut(value_buf, copy_len);
+            out_slice.copy_from_slice(&value[..copy_len]);
+
+            *out_len = value.len();
+
+            if value.len() > buf_len {
+                println!(
+                    "[Enclave] Get success but buffer too small: value_len={}, buf_len={}",
+                    value.len(),
+                    buf_len
+                );
+                return SgxStatus::InvalidParameter;
+            }
+
+            println!(
+                "[Enclave] Get success: key_len={}, value_len={}",
+                key_len,
+                value.len()
+            );
+            SgxStatus::Success
+        }
+        Ok(None) => {
+            println!("[Enclave] Get: key not found");
+            *out_len = 0;
+            SgxStatus::Success
+        }
+        Err(e) => {
+            println!("[Enclave] Get failed: {:?}", e);
+            SgxStatus::Unexpected
+        }
     }
 }
 

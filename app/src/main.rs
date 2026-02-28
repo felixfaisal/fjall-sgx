@@ -31,6 +31,27 @@ extern "C" {
         some_string: *const u8,
         len: usize,
     ) -> SgxStatus;
+
+    fn db_init(eid: EnclaveId, retval: *mut SgxStatus) -> SgxStatus;
+
+    fn db_put(
+        eid: EnclaveId,
+        retval: *mut SgxStatus,
+        key: *const u8,
+        key_len: usize,
+        value: *const u8,
+        value_len: usize,
+    ) -> SgxStatus;
+
+    fn db_get(
+        eid: EnclaveId,
+        retval: *mut SgxStatus,
+        key: *const u8,
+        key_len: usize,
+        value_buf: *mut u8,
+        buf_len: usize,
+        out_len: *mut usize,
+    ) -> SgxStatus;
 }
 
 // #[no_mangle]
@@ -142,6 +163,8 @@ fn main() {
         }
     };
 
+    // Test the original say_something function
+    println!("\n=== Testing say_something ===");
     let input_string = String::from("This is a normal world string passed into Enclave!\n");
     let mut retval = SgxStatus::Success;
 
@@ -154,7 +177,141 @@ fn main() {
         )
     };
     match result {
-        SgxStatus::Success => println!("[+] ECall Success..."),
-        _ => println!("[-] ECall Enclave Failed {}!", result.as_str()),
+        SgxStatus::Success => println!("[+] say_something ECall Success"),
+        _ => println!("[-] say_something ECall Failed: {}", result.as_str()),
     }
+
+    // Test database operations
+    println!("\n=== Testing Database Operations ===");
+
+    // 1. Initialize the database
+    println!("\n[Host] Step 1: Initializing database...");
+    let mut retval = SgxStatus::Success;
+    let result = unsafe { db_init(enclave.eid(), &mut retval) };
+
+    match result {
+        SgxStatus::Success => println!("[Host] ✓ Database initialized successfully"),
+        _ => {
+            println!(
+                "[Host] ✗ Database initialization failed: {}",
+                result.as_str()
+            );
+            return;
+        }
+    }
+
+    // 2. Put some key-value pairs
+    println!("\n[Host] Step 2: Putting key-value pairs...");
+
+    let test_data = vec![
+        ("hello", "world"),
+        ("foo", "bar"),
+        ("test_key", "test_value_123"),
+        ("sgx", "secure enclave"),
+    ];
+
+    for (key, value) in &test_data {
+        let mut retval = SgxStatus::Success;
+        let result = unsafe {
+            db_put(
+                enclave.eid(),
+                &mut retval,
+                key.as_ptr(),
+                key.len(),
+                value.as_ptr(),
+                value.len(),
+            )
+        };
+
+        match result {
+            SgxStatus::Success => {
+                println!("[Host] ✓ Put success: '{}' => '{}'", key, value);
+            }
+            _ => {
+                println!("[Host] ✗ Put failed for key '{}': {}", key, result.as_str());
+            }
+        }
+    }
+
+    // 3. Get the values back
+    println!("\n[Host] Step 3: Getting values back...");
+
+    for (key, expected_value) in &test_data {
+        let mut retval = SgxStatus::Success;
+        let mut value_buf = vec![0u8; 1024]; // Buffer for the value
+        let mut out_len: usize = 0;
+
+        let result = unsafe {
+            db_get(
+                enclave.eid(),
+                &mut retval,
+                key.as_ptr(),
+                key.len(),
+                value_buf.as_mut_ptr(),
+                value_buf.len(),
+                &mut out_len,
+            )
+        };
+
+        match result {
+            SgxStatus::Success => {
+                if out_len == 0 {
+                    println!("[Host] ✗ Key '{}' not found!", key);
+                } else {
+                    let retrieved_value = String::from_utf8_lossy(&value_buf[..out_len]);
+                    if retrieved_value == *expected_value {
+                        println!(
+                            "[Host] ✓ Get success: '{}' => '{}' (matches!)",
+                            key, retrieved_value
+                        );
+                    } else {
+                        println!(
+                            "[Host] ✗ Get mismatch: '{}' => '{}' (expected '{}')",
+                            key, retrieved_value, expected_value
+                        );
+                    }
+                }
+            }
+            _ => {
+                println!("[Host] ✗ Get failed for key '{}': {}", key, result.as_str());
+            }
+        }
+    }
+
+    // 4. Test getting a non-existent key
+    println!("\n[Host] Step 4: Testing non-existent key...");
+    let nonexistent_key = "does_not_exist";
+    let mut retval = SgxStatus::Success;
+    let mut value_buf = vec![0u8; 1024];
+    let mut out_len: usize = 0;
+
+    let result = unsafe {
+        db_get(
+            enclave.eid(),
+            &mut retval,
+            nonexistent_key.as_ptr(),
+            nonexistent_key.len(),
+            value_buf.as_mut_ptr(),
+            value_buf.len(),
+            &mut out_len,
+        )
+    };
+
+    match result {
+        SgxStatus::Success => {
+            if out_len == 0 {
+                println!(
+                    "[Host] ✓ Correctly returned not found for key '{}'",
+                    nonexistent_key
+                );
+            } else {
+                println!("[Host] ✗ Unexpectedly found value for non-existent key");
+            }
+        }
+        _ => {
+            println!("[Host] ✗ Get failed: {}", result.as_str());
+        }
+    }
+
+    println!("\n=== All tests completed ===");
 }

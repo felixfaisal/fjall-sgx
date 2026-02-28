@@ -21,6 +21,22 @@ enclave {
 
     trusted {
         public sgx_status_t say_something([in, size=len] const uint8_t* some_string, size_t len);
+
+        // Database operations
+        public sgx_status_t db_init(void);
+        public sgx_status_t db_put(
+            [in, size=key_len] const uint8_t* key,
+            size_t key_len,
+            [in, size=value_len] const uint8_t* value,
+            size_t value_len
+        );
+        public sgx_status_t db_get(
+            [in, size=key_len] const uint8_t* key,
+            size_t key_len,
+            [out, size=buf_len] uint8_t* value_buf,
+            size_t buf_len,
+            [out] size_t* out_len
+        );
     };
 
     untrusted {
