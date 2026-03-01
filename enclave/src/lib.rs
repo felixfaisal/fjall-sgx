@@ -31,7 +31,6 @@ use std::vec::Vec;
 
 use fjall_sgx::db::{Db, DbConfig};
 use fjall_sgx_storage::{FileId, StorageError, StorageReader, StorageWriter};
-use log::{debug, error, info, trace};
 
 use sgx_types::*;
 use std::sync::Mutex;
@@ -216,7 +215,7 @@ pub extern "C" fn db_init() -> SgxStatus {
     };
 
     *db_guard = Some(db);
-    info!("[Enclave] Database initialized successfully");
+    println!("[Enclave] Database initialized successfully");
 
     SgxStatus::Success
 }
@@ -243,7 +242,7 @@ pub unsafe extern "C" fn db_put(
     let db = match db_guard.as_mut() {
         Some(db) => db,
         None => {
-            error!("[Enclave] Error: DB not initialized. Call db_init() first.");
+            println!("[Enclave] Error: DB not initialized. Call db_init() first.");
             return SgxStatus::InvalidParameter;
         }
     };
@@ -251,14 +250,14 @@ pub unsafe extern "C" fn db_put(
     // Perform the put operation
     match db.put(key_slice, value_slice) {
         Ok(_) => {
-            info!(
+            println!(
                 "[Enclave] Put success: key_len={}, value_len={}",
                 key_len, value_len
             );
             SgxStatus::Success
         }
         Err(e) => {
-            error!("[Enclave] Put failed: {:?}", e);
+            println!("[Enclave] Put failed: {:?}", e);
             SgxStatus::Unexpected
         }
     }
@@ -287,7 +286,7 @@ pub unsafe extern "C" fn db_get(
     let db = match db_guard.as_ref() {
         Some(db) => db,
         None => {
-            error!("[Enclave] Error: DB not initialized. Call db_init() first.");
+            println!("[Enclave] Error: DB not initialized. Call db_init() first.");
             return SgxStatus::InvalidParameter;
         }
     };
@@ -304,7 +303,7 @@ pub unsafe extern "C" fn db_get(
             *out_len = value.len();
 
             if value.len() > buf_len {
-                info!(
+                println!(
                     "[Enclave] Get success but buffer too small: value_len={}, buf_len={}",
                     value.len(),
                     buf_len
@@ -312,7 +311,7 @@ pub unsafe extern "C" fn db_get(
                 return SgxStatus::InvalidParameter;
             }
 
-            info!(
+            println!(
                 "[Enclave] Get success: key_len={}, value_len={}",
                 key_len,
                 value.len()
@@ -320,12 +319,12 @@ pub unsafe extern "C" fn db_get(
             SgxStatus::Success
         }
         Ok(None) => {
-            warn!("[Enclave] Get: key not found");
+            println!("[Enclave] Get: key not found");
             *out_len = 0;
             SgxStatus::Success
         }
         Err(e) => {
-            error!("[Enclave] Get failed: {:?}", e);
+            println!("[Enclave] Get failed: {:?}", e);
             SgxStatus::Unexpected
         }
     }
