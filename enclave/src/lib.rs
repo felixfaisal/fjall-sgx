@@ -218,6 +218,7 @@ impl StorageWriter for SgxOcallStorage {
             )));
         }
 
+        println!("[Enclave] create_file() returned file_id={}", file_id);
         Ok(file_id)
     }
 
