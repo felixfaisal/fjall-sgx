@@ -22,6 +22,68 @@ use sgx_types::error::SgxStatus;
 use sgx_types::types::*;
 use sgx_urts::enclave::SgxEnclave;
 
+use std::collections::HashMap;
+use std::fs;
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+// Global file storage
+// Maps file_id -> file path
+lazy_static::lazy_static! {
+    static ref FILE_STORAGE: Mutex<FileStore> = Mutex::new(FileStore::new());
+}
+
+struct FileStore {
+    next_file_id: u64,
+    files: HashMap<u64, PathBuf>,
+    data_dir: PathBuf,
+}
+
+impl FileStore {
+    fn new() -> Self {
+        let data_dir = PathBuf::from("./data");
+        fs::create_dir_all(&data_dir).expect("Failed to create data directory");
+
+        Self {
+            next_file_id: 1,
+            files: HashMap::new(),
+            data_dir,
+        }
+    }
+
+    fn create_file(&mut self) -> u64 {
+        let file_id = self.next_file_id;
+        self.next_file_id += 1;
+
+        let file_path = self.data_dir.join(format!("file_{}.sealed", file_id));
+        self.files.insert(file_id, file_path);
+
+        file_id
+    }
+
+    fn get_path(&self, file_id: u64) -> Option<PathBuf> {
+        self.files.get(&file_id).cloned()
+    }
+
+    fn delete_file(&mut self, file_id: u64) -> bool {
+        if let Some(path) = self.files.remove(&file_id) {
+            let _ = fs::remove_file(path);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn file_exists(&self, file_id: u64) -> bool {
+        if let Some(path) = self.files.get(&file_id) {
+            path.exists()
+        } else {
+            false
+        }
+    }
+}
+
 use log::{debug, error, info, trace};
 
 static ENCLAVE_FILE: &str = "enclave.signed.so";
@@ -61,11 +123,20 @@ extern "C" {
 /// Create a new file and return its file_id
 #[no_mangle]
 pub extern "C" fn ocall_create_file(file_id: *mut u64) -> SgxStatus {
-    // TODO: Implement file creation logic
-    // For now, return a dummy file_id
+    let mut store = match FILE_STORAGE.lock() {
+        Ok(store) => store,
+        Err(e) => {
+            eprintln!("[Host] Failed to lock file storage: {}", e);
+            return SgxStatus::Unexpected;
+        }
+    };
+
+    let new_file_id = store.create_file();
     unsafe {
-        *file_id = 0;
+        *file_id = new_file_id;
     }
+
+    println!("[Host] Created file with ID: {}", new_file_id);
     SgxStatus::Success
 }
 
@@ -77,12 +148,45 @@ pub extern "C" fn ocall_append(
     len: usize,
     bytes_written: *mut u64,
 ) -> SgxStatus {
-    // TODO: Implement file append logic
-    // let slice = unsafe { std::slice::from_raw_parts(data, len) };
-    unsafe {
-        *bytes_written = len as u64;
+    let store = match FILE_STORAGE.lock() {
+        Ok(store) => store,
+        Err(e) => {
+            eprintln!("[Host] Failed to lock file storage: {}", e);
+            return SgxStatus::Unexpected;
+        }
+    };
+
+    let path = match store.get_path(file_id) {
+        Some(p) => p,
+        None => {
+            eprintln!("[Host] File ID {} not found", file_id);
+            return SgxStatus::InvalidParameter;
+        }
+    };
+
+    // Get sealed data from enclave
+    let sealed_data = unsafe { std::slice::from_raw_parts(data, len) };
+
+    // Append to file (host sees only opaque sealed bytes)
+    match fs::OpenOptions::new().create(true).append(true).open(&path) {
+        Ok(mut file) => match file.write_all(sealed_data) {
+            Ok(_) => {
+                unsafe {
+                    *bytes_written = len as u64;
+                }
+                println!("[Host] Appended {} sealed bytes to file {}", len, file_id);
+                SgxStatus::Success
+            }
+            Err(e) => {
+                eprintln!("[Host] Failed to write to file: {}", e);
+                SgxStatus::Unexpected
+            }
+        },
+        Err(e) => {
+            eprintln!("[Host] Failed to open file: {}", e);
+            SgxStatus::Unexpected
+        }
     }
-    SgxStatus::Success
 }
 
 /// Read data from a file at a specific offset
@@ -94,51 +198,174 @@ pub extern "C" fn ocall_read_at(
     buf_len: usize,
     bytes_read: *mut usize,
 ) -> SgxStatus {
-    // TODO: Implement file read logic
-    unsafe {
-        *bytes_read = 0;
+    let store = match FILE_STORAGE.lock() {
+        Ok(store) => store,
+        Err(e) => {
+            eprintln!("[Host] Failed to lock file storage: {}", e);
+            return SgxStatus::Unexpected;
+        }
+    };
+
+    let path = match store.get_path(file_id) {
+        Some(p) => p,
+        None => {
+            eprintln!("[Host] File ID {} not found", file_id);
+            return SgxStatus::InvalidParameter;
+        }
+    };
+
+    match fs::File::open(&path) {
+        Ok(mut file) => {
+            // Seek to offset
+            if let Err(e) = file.seek(SeekFrom::Start(offset)) {
+                eprintln!("[Host] Failed to seek: {}", e);
+                return SgxStatus::Unexpected;
+            }
+
+            // Read sealed data
+            let output_slice = unsafe { std::slice::from_raw_parts_mut(buf, buf_len) };
+            match file.read(output_slice) {
+                Ok(n) => {
+                    unsafe {
+                        *bytes_read = n;
+                    }
+                    println!(
+                        "[Host] Read {} sealed bytes from file {} at offset {}",
+                        n, file_id, offset
+                    );
+                    SgxStatus::Success
+                }
+                Err(e) => {
+                    eprintln!("[Host] Failed to read from file: {}", e);
+                    SgxStatus::Unexpected
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("[Host] Failed to open file for reading: {}", e);
+            SgxStatus::Unexpected
+        }
     }
-    SgxStatus::Success
 }
 
 /// Get the size of a file
 #[no_mangle]
 pub extern "C" fn ocall_file_size(file_id: u64, size: *mut u64) -> SgxStatus {
-    // TODO: Implement file size query
-    unsafe {
-        *size = 0;
+    let store = match FILE_STORAGE.lock() {
+        Ok(store) => store,
+        Err(e) => {
+            eprintln!("[Host] Failed to lock file storage: {}", e);
+            return SgxStatus::Unexpected;
+        }
+    };
+
+    let path = match store.get_path(file_id) {
+        Some(p) => p,
+        None => {
+            eprintln!("[Host] File ID {} not found", file_id);
+            return SgxStatus::InvalidParameter;
+        }
+    };
+
+    match fs::metadata(&path) {
+        Ok(metadata) => {
+            unsafe {
+                *size = metadata.len();
+            }
+            SgxStatus::Success
+        }
+        Err(_) => {
+            // File doesn't exist yet, return size 0
+            unsafe {
+                *size = 0;
+            }
+            SgxStatus::Success
+        }
     }
-    SgxStatus::Success
 }
 
 /// Sync/flush a file to disk
 #[no_mangle]
 pub extern "C" fn ocall_sync(file_id: u64) -> SgxStatus {
-    // TODO: Implement file sync logic
-    SgxStatus::Success
+    let store = match FILE_STORAGE.lock() {
+        Ok(store) => store,
+        Err(e) => {
+            eprintln!("[Host] Failed to lock file storage: {}", e);
+            return SgxStatus::Unexpected;
+        }
+    };
+
+    let path = match store.get_path(file_id) {
+        Some(p) => p,
+        None => {
+            eprintln!("[Host] File ID {} not found", file_id);
+            return SgxStatus::InvalidParameter;
+        }
+    };
+
+    match fs::OpenOptions::new().write(true).open(&path) {
+        Ok(file) => match file.sync_all() {
+            Ok(_) => {
+                println!("[Host] Synced file {}", file_id);
+                SgxStatus::Success
+            }
+            Err(e) => {
+                eprintln!("[Host] Failed to sync file: {}", e);
+                SgxStatus::Unexpected
+            }
+        },
+        Err(_) => {
+            // File might not exist yet, that's ok
+            SgxStatus::Success
+        }
+    }
 }
 
 /// Close a file
 #[no_mangle]
 pub extern "C" fn ocall_close_file(file_id: u64) -> SgxStatus {
-    // TODO: Implement file close logic
+    println!("[Host] Closed file {}", file_id);
+    // In Rust, files are automatically closed when dropped
+    // Nothing to do here explicitly
     SgxStatus::Success
 }
 
 /// Delete a file
 #[no_mangle]
 pub extern "C" fn ocall_delete_file(file_id: u64) -> SgxStatus {
-    // TODO: Implement file deletion logic
-    SgxStatus::Success
+    let mut store = match FILE_STORAGE.lock() {
+        Ok(store) => store,
+        Err(e) => {
+            eprintln!("[Host] Failed to lock file storage: {}", e);
+            return SgxStatus::Unexpected;
+        }
+    };
+
+    if store.delete_file(file_id) {
+        println!("[Host] Deleted file {}", file_id);
+        SgxStatus::Success
+    } else {
+        eprintln!("[Host] File ID {} not found for deletion", file_id);
+        SgxStatus::InvalidParameter
+    }
 }
 
 /// Check if a file exists
 #[no_mangle]
 pub extern "C" fn ocall_file_exists(file_id: u64, exists: *mut u8) -> SgxStatus {
-    // TODO: Implement file existence check
+    let store = match FILE_STORAGE.lock() {
+        Ok(store) => store,
+        Err(e) => {
+            eprintln!("[Host] Failed to lock file storage: {}", e);
+            return SgxStatus::Unexpected;
+        }
+    };
+
+    let file_exists = store.file_exists(file_id);
     unsafe {
-        *exists = 0; // 0 = does not exist, 1 = exists
+        *exists = if file_exists { 1 } else { 0 };
     }
+
     SgxStatus::Success
 }
 
