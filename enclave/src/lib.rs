@@ -22,6 +22,7 @@
 #[macro_use]
 extern crate sgx_tstd as std;
 extern crate sgx_trts;
+extern crate sgx_tseal;
 extern crate sgx_types;
 
 use sgx_types::error::SgxStatus;
@@ -207,17 +208,34 @@ impl StorageWriter for SgxOcallStorage {
     }
 
     fn append(&mut self, file_id: FileId, data: &[u8]) -> Result<u64, StorageError> {
+        println!(
+            "[Enclave] About to seal {} bytes for file {}",
+            data.len(),
+            file_id
+        );
+
         // Seal plaintext data before sending to untrusted host
-        let sealed = SealedData::<[u8]>::seal(
+        let sealed = match SealedData::<[u8]>::seal(
             data,
             Some(b"fjall_sstable"), // AAD for context
-        )
-        .map_err(|e| StorageError::Io(format!("seal failed: {:?}", e)))?;
+        ) {
+            Ok(s) => {
+                println!("[Enclave] Seal successful");
+                s
+            }
+            Err(e) => {
+                println!("[Enclave] Seal FAILED: {:?}", e);
+                return Err(StorageError::Io(format!("seal failed: {:?}", e)));
+            }
+        };
+
+        println!("[Enclave] Converting sealed data to bytes...");
 
         // Serialize sealed data to bytes
-        let sealed_bytes = sealed
-            .into_bytes()
-            .map_err(|e| StorageError::Io(format!("seal into_bytes failed: {:?}", e)))?;
+        let sealed_bytes = sealed.into_bytes().map_err(|e| {
+            println!("[Enclave] into_bytes FAILED: {:?}", e);
+            StorageError::Io(format!("seal into_bytes failed: {:?}", e))
+        })?;
 
         println!(
             "[Enclave] Sealed {} bytes → {} bytes (overhead: {})",
