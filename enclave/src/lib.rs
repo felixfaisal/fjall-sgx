@@ -436,3 +436,67 @@ pub unsafe extern "C" fn db_get(
         }
     }
 }
+
+/// Test SGX sealing in simulation mode
+#[no_mangle]
+pub extern "C" fn test_seal() -> SgxStatus {
+    println!("[Enclave] Testing SGX seal/unseal...");
+
+    // Simple test data
+    let test_data: [u8; 5] = [1, 2, 3, 4, 5];
+    println!("[Enclave] Original data: {:?}", test_data);
+
+    // Try to seal
+    println!("[Enclave] Attempting to seal...");
+    let sealed = match SealedData::<[u8]>::seal(&test_data, None::<&[u8]>) {
+        Ok(s) => {
+            println!("[Enclave] ✓ Seal successful!");
+            s
+        }
+        Err(e) => {
+            println!("[Enclave] ✗ Seal FAILED: {:?}", e);
+            return SgxStatus::Unexpected;
+        }
+    };
+
+    // Convert to bytes
+    println!("[Enclave] Converting to bytes...");
+    let sealed_bytes = match sealed.into_bytes() {
+        Ok(b) => {
+            println!("[Enclave] ✓ Converted to {} bytes", b.len());
+            b
+        }
+        Err(e) => {
+            println!("[Enclave] ✗ into_bytes FAILED: {:?}", e);
+            return SgxStatus::Unexpected;
+        }
+    };
+
+    // Try to unseal
+    println!("[Enclave] Attempting to unseal...");
+    let unsealed = match UnsealedData::<[u8]>::unseal_from_bytes(sealed_bytes) {
+        Ok(u) => {
+            println!("[Enclave] ✓ Unseal successful!");
+            u
+        }
+        Err(e) => {
+            println!("[Enclave] ✗ Unseal FAILED: {:?}", e);
+            return SgxStatus::Unexpected;
+        }
+    };
+
+    // Verify data
+    let plaintext = unsealed.to_plaintext();
+    println!("[Enclave] Unsealed data: {:?}", plaintext);
+
+    if plaintext == &test_data {
+        println!("[Enclave] ✓✓✓ SUCCESS! Seal/unseal works in simulation mode!");
+        SgxStatus::Success
+    } else {
+        println!(
+            "[Enclave] ✗ Data mismatch! Expected {:?}, got {:?}",
+            test_data, plaintext
+        );
+        SgxStatus::Unexpected
+    }
+}

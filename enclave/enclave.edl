@@ -20,6 +20,7 @@ enclave {
     from "sgx_tstd.edl" import *;
 
     trusted {
+        public sgx_status_t test_seal(void);
         public sgx_status_t db_init(void);
         public sgx_status_t db_put(
             [in, size=key_len] const uint8_t* key,
