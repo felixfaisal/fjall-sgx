@@ -31,6 +31,9 @@ default = []
 [target.'cfg(not(target_vendor = "teaclave"))'.dependencies]
 sgx_types = { git = "https://github.com/apache/incubator-teaclave-sgx-sdk.git" }
 sgx_tstd = { git = "https://github.com/apache/incubator-teaclave-sgx-sdk.git" }
+sgx_tseal = { git = "https://github.com/apache/incubator-teaclave-sgx-sdk.git" }
+sgx_trts = { git = "https://github.com/apache/incubator-teaclave-sgx-sdk.git" }
+sgx_serialize = { git = "https://github.com/apache/incubator-teaclave-sgx-sdk.git" , features = ["derive"]}
 lsm-sgx = { path = "../lsm-sgx", default-features = false }
 fjall-sgx = { path = "../engine", default-features = false }
 fjall-sgx-storage = { path = "../storage", default-features = false }

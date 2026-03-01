@@ -21,6 +21,7 @@
 #[cfg(not(target_vendor = "teaclave"))]
 #[macro_use]
 extern crate sgx_tstd as std;
+extern crate sgx_trts;
 extern crate sgx_types;
 
 use sgx_types::error::SgxStatus;
@@ -32,6 +33,7 @@ use std::vec::Vec;
 use fjall_sgx::db::{Db, DbConfig};
 use fjall_sgx_storage::{FileId, StorageError, StorageReader, StorageWriter};
 
+use sgx_tseal::seal::*;
 use sgx_types::*;
 use std::sync::Mutex;
 
@@ -78,14 +80,76 @@ impl SgxOcallStorage {
 
 impl StorageReader for SgxOcallStorage {
     fn read_at(&self, file_id: FileId, offset: u64, buf: &mut [u8]) -> Result<usize, StorageError> {
+        // For read_at, we need to read the entire sealed file, unseal it, then return the slice
+        // This is because sealing is done at file-level, not block-level
+        let full_data = self.read_all(file_id)?;
+
+        let offset = offset as usize;
+        if offset >= full_data.len() {
+            return Ok(0);
+        }
+
+        let available = full_data.len() - offset;
+        let to_read = buf.len().min(available);
+        buf[..to_read].copy_from_slice(&full_data[offset..offset + to_read]);
+
+        Ok(to_read)
+    }
+
+    fn file_size(&self, file_id: FileId) -> Result<u64, StorageError> {
+        // Get sealed file size from host
+        let mut sealed_size: u64 = 0;
+
+        let status = unsafe { ocall_file_size(file_id, &mut sealed_size as *mut u64) };
+
+        if status != SgxStatus::Success {
+            return Err(StorageError::Io(format!(
+                "OCALL file_size failed: {:?}",
+                status
+            )));
+        }
+
+        // We need to unseal to get plaintext size
+        // For now, read and unseal the file (could cache this)
+        let plaintext = self.read_all(file_id)?;
+        Ok(plaintext.len() as u64)
+    }
+
+    fn exists(&self, file_id: FileId) -> bool {
+        let mut exists: u8 = 0;
+
+        let status = unsafe { ocall_file_exists(file_id, &mut exists as *mut u8) };
+
+        status == SgxStatus::Success && exists != 0
+    }
+
+    fn read_all(&self, file_id: FileId) -> Result<Vec<u8>, StorageError> {
+        // First, get the sealed file size
+        let mut sealed_size: u64 = 0;
+        let status = unsafe { ocall_file_size(file_id, &mut sealed_size as *mut u64) };
+
+        if status != SgxStatus::Success {
+            return Err(StorageError::Io(format!(
+                "OCALL file_size failed: {:?}",
+                status
+            )));
+        }
+
+        if sealed_size == 0 {
+            return Ok(Vec::new());
+        }
+
+        // Allocate buffer for sealed data
+        let mut sealed_buffer = vec![0u8; sealed_size as usize];
         let mut bytes_read: usize = 0;
 
+        // Read sealed bytes from host via OCALL
         let status = unsafe {
             ocall_read_at(
                 file_id,
-                offset,
-                buf.as_mut_ptr(),
-                buf.len(),
+                0, // Read from beginning
+                sealed_buffer.as_mut_ptr(),
+                sealed_buffer.len(),
                 &mut bytes_read as *mut usize,
             )
         };
@@ -97,30 +161,32 @@ impl StorageReader for SgxOcallStorage {
             )));
         }
 
-        Ok(bytes_read)
-    }
+        sealed_buffer.truncate(bytes_read);
 
-    fn file_size(&self, file_id: FileId) -> Result<u64, StorageError> {
-        let mut size: u64 = 0;
+        println!("[Enclave] Read {} sealed bytes, unsealing...", bytes_read);
 
-        let status = unsafe { ocall_file_size(file_id, &mut size as *mut u64) };
+        // Unseal to get plaintext
+        let unsealed = UnsealedData::<[u8]>::unseal_from_bytes(sealed_buffer)
+            .map_err(|e| StorageError::Io(format!("unseal failed: {:?}", e)))?;
 
-        if status != SgxStatus::Success {
+        // Verify AAD matches (optional but recommended)
+        let aad = unsealed.to_aad();
+        if aad != b"fjall_sstable" {
             return Err(StorageError::Io(format!(
-                "OCALL file_size failed: {:?}",
-                status
+                "AAD mismatch: expected 'fjall_sstable', got '{:?}'",
+                std::str::from_utf8(aad).unwrap_or("<invalid>")
             )));
         }
 
-        Ok(size)
-    }
+        // Extract plaintext
+        let plaintext = unsealed.to_plaintext();
+        println!(
+            "[Enclave] Unsealed {} bytes → {} bytes",
+            bytes_read,
+            plaintext.len()
+        );
 
-    fn exists(&self, file_id: FileId) -> bool {
-        let mut exists: u8 = 0;
-
-        let status = unsafe { ocall_file_exists(file_id, &mut exists as *mut u8) };
-
-        status == SgxStatus::Success && exists != 0
+        Ok(plaintext.to_vec())
     }
 }
 
@@ -141,13 +207,32 @@ impl StorageWriter for SgxOcallStorage {
     }
 
     fn append(&mut self, file_id: FileId, data: &[u8]) -> Result<u64, StorageError> {
-        let mut bytes_written: u64 = 0;
+        // Seal plaintext data before sending to untrusted host
+        let sealed = SealedData::<[u8]>::seal(
+            data,
+            Some(b"fjall_sstable"), // AAD for context
+        )
+        .map_err(|e| StorageError::Io(format!("seal failed: {:?}", e)))?;
 
+        // Serialize sealed data to bytes
+        let sealed_bytes = sealed
+            .into_bytes()
+            .map_err(|e| StorageError::Io(format!("seal into_bytes failed: {:?}", e)))?;
+
+        println!(
+            "[Enclave] Sealed {} bytes → {} bytes (overhead: {})",
+            data.len(),
+            sealed_bytes.len(),
+            sealed_bytes.len() - data.len()
+        );
+
+        // Send sealed bytes via OCALL
+        let mut bytes_written: u64 = 0;
         let status = unsafe {
             ocall_append(
                 file_id,
-                data.as_ptr(),
-                data.len(),
+                sealed_bytes.as_ptr(),
+                sealed_bytes.len(),
                 &mut bytes_written as *mut u64,
             )
         };
@@ -205,7 +290,6 @@ impl StorageWriter for SgxOcallStorage {
 /// This should be called once before any put/get operations
 #[no_mangle]
 pub extern "C" fn db_init() -> SgxStatus {
-    env_logger::init();
     let ocall_storage = SgxOcallStorage::new();
     let db = Db::open(ocall_storage, DbConfig::default());
 
@@ -228,7 +312,6 @@ pub unsafe extern "C" fn db_put(
     value: *const u8,
     value_len: usize,
 ) -> SgxStatus {
-    env_logger::init();
     // Convert raw pointers to slices
     let key_slice = slice::from_raw_parts(key, key_len);
     let value_slice = slice::from_raw_parts(value, value_len);
@@ -273,7 +356,6 @@ pub unsafe extern "C" fn db_get(
     buf_len: usize,
     out_len: *mut usize,
 ) -> SgxStatus {
-    env_logger::init();
     // Convert raw pointers to slices
     let key_slice = slice::from_raw_parts(key, key_len);
 
