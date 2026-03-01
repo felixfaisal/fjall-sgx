@@ -514,5 +514,119 @@ fn main() {
         }
     }
 
+    // 5. Test disk write (trigger flush) and read from disk
+    info!("\n[Host] Step 5: Testing disk flush and read...");
+    info!("[Host] Writing large values to trigger memtable flush (limit: 512 bytes)...");
+
+    // Write enough data to exceed memtable limit (512 bytes)
+    // Each entry has overhead, so a few large values will trigger flush
+    let large_test_data = vec![
+        ("disk_key_1", "x".repeat(100)), // 100 byte value
+        ("disk_key_2", "y".repeat(100)), // 100 byte value
+        ("disk_key_3", "z".repeat(100)), // 100 byte value
+        ("disk_key_4", "a".repeat(100)), // 100 byte value
+        ("disk_key_5", "b".repeat(100)), // 100 byte value
+    ];
+
+    info!(
+        "[Host] Writing {} entries with 100-byte values...",
+        large_test_data.len()
+    );
+
+    for (key, value) in &large_test_data {
+        let mut retval = SgxStatus::Success;
+        let result = unsafe {
+            db_put(
+                enclave.eid(),
+                &mut retval,
+                key.as_ptr(),
+                key.len(),
+                value.as_ptr(),
+                value.len(),
+            )
+        };
+
+        match result {
+            SgxStatus::Success => {
+                info!("[Host] ✓ Put success: '{}' => {}B", key, value.len());
+            }
+            _ => {
+                error!("[Host] ✗ Put failed for key '{}': {}", key, result.as_str());
+            }
+        }
+    }
+
+    info!("\n[Host] MemTable should have flushed to disk. Now reading back from disk...");
+
+    // Read back the data (should come from SSTable on disk)
+    for (key, expected_value) in &large_test_data {
+        let mut retval = SgxStatus::Success;
+        let mut value_buf = vec![0u8; 1024];
+        let mut out_len: usize = 0;
+
+        let result = unsafe {
+            db_get(
+                enclave.eid(),
+                &mut retval,
+                key.as_ptr(),
+                key.len(),
+                value_buf.as_mut_ptr(),
+                value_buf.len(),
+                &mut out_len,
+            )
+        };
+
+        match result {
+            SgxStatus::Success => {
+                if out_len == 0 {
+                    error!("[Host] ✗ Key '{}' not found on disk!", key);
+                } else {
+                    let retrieved_value = String::from_utf8_lossy(&value_buf[..out_len]);
+                    if retrieved_value == *expected_value {
+                        info!(
+                            "[Host] ✓ Disk read success: '{}' => {}B (matches!)",
+                            key, out_len
+                        );
+                    } else {
+                        error!(
+                            "[Host] ✗ Disk read mismatch: '{}' (expected {}B, got {}B)",
+                            key,
+                            expected_value.len(),
+                            out_len
+                        );
+                    }
+                }
+            }
+            _ => {
+                error!("[Host] ✗ Get failed for key '{}': {}", key, result.as_str());
+            }
+        }
+    }
+
+    info!("\n[Host] Checking if sealed files were created on disk...");
+    let data_dir = std::path::Path::new("./data");
+    if data_dir.exists() {
+        match std::fs::read_dir(data_dir) {
+            Ok(entries) => {
+                let files: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+                info!("[Host] ✓ Found {} sealed file(s) in ./data/", files.len());
+                for entry in files {
+                    let metadata = entry.metadata().ok();
+                    let size = metadata.map(|m| m.len()).unwrap_or(0);
+                    info!(
+                        "[Host]   - {} ({} bytes)",
+                        entry.file_name().to_string_lossy(),
+                        size
+                    );
+                }
+            }
+            Err(e) => {
+                error!("[Host] ✗ Failed to read data directory: {}", e);
+            }
+        }
+    } else {
+        error!("[Host] ✗ No ./data directory found");
+    }
+
     info!("\n=== All tests completed ===");
 }

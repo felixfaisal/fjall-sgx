@@ -291,7 +291,14 @@ impl StorageWriter for SgxOcallStorage {
 #[no_mangle]
 pub extern "C" fn db_init() -> SgxStatus {
     let ocall_storage = SgxOcallStorage::new();
-    let db = Db::open(ocall_storage, DbConfig::default());
+
+    // Use small memtable for testing (will flush to disk quickly)
+    let config = DbConfig {
+        memtable_size_limit: 512, // 512 bytes - triggers flush quickly for testing
+        ..DbConfig::default()
+    };
+
+    let db = Db::open(ocall_storage, config);
 
     let mut db_guard = match DB_INSTANCE.lock() {
         Ok(guard) => guard,
@@ -299,7 +306,7 @@ pub extern "C" fn db_init() -> SgxStatus {
     };
 
     *db_guard = Some(db);
-    println!("[Enclave] Database initialized successfully");
+    println!("[Enclave] Database initialized with 512-byte memtable (testing mode)");
 
     SgxStatus::Success
 }
