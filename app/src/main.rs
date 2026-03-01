@@ -28,6 +28,8 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use log::{debug, error, info, trace, warn};
+
 // Global file storage
 // Maps file_id -> file path
 lazy_static::lazy_static! {
@@ -83,8 +85,6 @@ impl FileStore {
         }
     }
 }
-
-use log::{debug, error, info, trace};
 
 static ENCLAVE_FILE: &str = "enclave.signed.so";
 
