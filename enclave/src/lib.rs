@@ -127,9 +127,9 @@ impl StorageReader for SgxOcallStorage {
     }
 
     fn read_all(&self, file_id: FileId) -> Result<Vec<u8>, StorageError> {
-        // First, get the sealed file size
-        let mut sealed_size: u64 = 0;
-        let status = unsafe { ocall_file_size(file_id, &mut sealed_size as *mut u64) };
+        // First, get the file size
+        let mut file_size: u64 = 0;
+        let status = unsafe { ocall_file_size(file_id, &mut file_size as *mut u64) };
 
         if status != SgxStatus::Success {
             return Err(StorageError::Io(format!(
@@ -138,21 +138,21 @@ impl StorageReader for SgxOcallStorage {
             )));
         }
 
-        if sealed_size == 0 {
+        if file_size == 0 {
             return Ok(Vec::new());
         }
 
-        // Allocate buffer for sealed data
-        let mut sealed_buffer = vec![0u8; sealed_size as usize];
+        // Allocate buffer for data
+        let mut buffer = vec![0u8; file_size as usize];
         let mut bytes_read: usize = 0;
 
-        // Read sealed bytes from host via OCALL
+        // Read bytes from host via OCALL
         let status = unsafe {
             ocall_read_at(
                 file_id,
                 0, // Read from beginning
-                sealed_buffer.as_mut_ptr(),
-                sealed_buffer.len(),
+                buffer.as_mut_ptr(),
+                buffer.len(),
                 &mut bytes_read as *mut usize,
             )
         };
@@ -164,32 +164,44 @@ impl StorageReader for SgxOcallStorage {
             )));
         }
 
-        sealed_buffer.truncate(bytes_read);
+        buffer.truncate(bytes_read);
 
-        println!("[Enclave] Read {} sealed bytes, unsealing...", bytes_read);
-
-        // Unseal to get plaintext
-        let unsealed = UnsealedData::<[u8]>::unseal_from_bytes(sealed_buffer)
-            .map_err(|e| StorageError::Io(format!("unseal failed: {:?}", e)))?;
-
-        // Verify AAD matches (optional but recommended)
-        let aad = unsealed.to_aad();
-        if aad != b"fjall_sstable" {
-            return Err(StorageError::Io(format!(
-                "AAD mismatch: expected 'fjall_sstable', got '{:?}'",
-                std::str::from_utf8(aad).unwrap_or("<invalid>")
-            )));
+        #[cfg(feature = "sw-mode")]
+        {
+            println!("[Enclave] SW MODE: Read {} bytes (plaintext)", bytes_read);
+            return Ok(buffer);
         }
 
-        // Extract plaintext
-        let plaintext = unsealed.to_plaintext();
-        println!(
-            "[Enclave] Unsealed {} bytes → {} bytes",
-            bytes_read,
-            plaintext.len()
-        );
+        #[cfg(not(feature = "sw-mode"))]
+        {
+            println!(
+                "[Enclave] HW MODE: Read {} sealed bytes, unsealing...",
+                bytes_read
+            );
 
-        Ok(plaintext.to_vec())
+            // Unseal to get plaintext
+            let unsealed = UnsealedData::<[u8]>::unseal_from_bytes(buffer)
+                .map_err(|e| StorageError::Io(format!("unseal failed: {:?}", e)))?;
+
+            // Verify AAD matches (optional but recommended)
+            let aad = unsealed.to_aad();
+            if aad != b"fjall_sstable" {
+                return Err(StorageError::Io(format!(
+                    "AAD mismatch: expected 'fjall_sstable', got '{:?}'",
+                    std::str::from_utf8(aad).unwrap_or("<invalid>")
+                )));
+            }
+
+            // Extract plaintext
+            let plaintext = unsealed.to_plaintext();
+            println!(
+                "[Enclave] Unsealed {} bytes → {} bytes",
+                bytes_read,
+                plaintext.len()
+            );
+
+            Ok(plaintext.to_vec())
+        }
     }
 }
 
@@ -210,61 +222,97 @@ impl StorageWriter for SgxOcallStorage {
     }
 
     fn append(&mut self, file_id: FileId, data: &[u8]) -> Result<u64, StorageError> {
-        println!(
-            "[Enclave] About to seal {} bytes for file {}",
-            data.len(),
-            file_id
-        );
+        #[cfg(feature = "sw-mode")]
+        {
+            println!(
+                "[Enclave] SW MODE: Writing {} bytes WITHOUT sealing for file {}",
+                data.len(),
+                file_id
+            );
 
-        // Seal plaintext data before sending to untrusted host
-        let sealed = match SealedData::<[u8]>::seal(
-            data,
-            Some(b"fjall_sstable"), // AAD for context
-        ) {
-            Ok(s) => {
-                println!("[Enclave] Seal successful");
-                s
+            // In simulation mode: skip sealing, write plaintext directly
+            let mut bytes_written: u64 = 0;
+            let status = unsafe {
+                ocall_append(
+                    file_id,
+                    data.as_ptr(),
+                    data.len(),
+                    &mut bytes_written as *mut u64,
+                )
+            };
+
+            if status != SgxStatus::Success {
+                return Err(StorageError::Io(format!(
+                    "OCALL append failed: {:?}",
+                    status
+                )));
             }
-            Err(e) => {
-                println!("[Enclave] Seal FAILED: {:?}", e);
-                return Err(StorageError::Io(format!("seal failed: {:?}", e)));
-            }
-        };
 
-        println!("[Enclave] Converting sealed data to bytes...");
-
-        // Serialize sealed data to bytes
-        let sealed_bytes = sealed.into_bytes().map_err(|e| {
-            println!("[Enclave] into_bytes FAILED: {:?}", e);
-            StorageError::Io(format!("seal into_bytes failed: {:?}", e))
-        })?;
-
-        println!(
-            "[Enclave] Sealed {} bytes → {} bytes (overhead: {})",
-            data.len(),
-            sealed_bytes.len(),
-            sealed_bytes.len() - data.len()
-        );
-
-        // Send sealed bytes via OCALL
-        let mut bytes_written: u64 = 0;
-        let status = unsafe {
-            ocall_append(
-                file_id,
-                sealed_bytes.as_ptr(),
-                sealed_bytes.len(),
-                &mut bytes_written as *mut u64,
-            )
-        };
-
-        if status != SgxStatus::Success {
-            return Err(StorageError::Io(format!(
-                "OCALL append failed: {:?}",
-                status
-            )));
+            println!(
+                "[Enclave] SW MODE: Wrote {} bytes (plaintext)",
+                bytes_written
+            );
+            return Ok(bytes_written);
         }
 
-        Ok(bytes_written)
+        #[cfg(not(feature = "sw-mode"))]
+        {
+            println!(
+                "[Enclave] HW MODE: Sealing {} bytes for file {}",
+                data.len(),
+                file_id
+            );
+
+            // In hardware mode: use real SGX sealing
+            let sealed = match SealedData::<[u8]>::seal(
+                data,
+                Some(b"fjall_sstable"), // AAD for context
+            ) {
+                Ok(s) => {
+                    println!("[Enclave] Seal successful");
+                    s
+                }
+                Err(e) => {
+                    println!("[Enclave] Seal FAILED: {:?}", e);
+                    return Err(StorageError::Io(format!("seal failed: {:?}", e)));
+                }
+            };
+
+            println!("[Enclave] Converting sealed data to bytes...");
+
+            // Serialize sealed data to bytes
+            let sealed_bytes = sealed.into_bytes().map_err(|e| {
+                println!("[Enclave] into_bytes FAILED: {:?}", e);
+                StorageError::Io(format!("seal into_bytes failed: {:?}", e))
+            })?;
+
+            println!(
+                "[Enclave] Sealed {} bytes → {} bytes (overhead: {})",
+                data.len(),
+                sealed_bytes.len(),
+                sealed_bytes.len() - data.len()
+            );
+
+            // Send sealed bytes via OCALL
+            let mut bytes_written: u64 = 0;
+            let status = unsafe {
+                ocall_append(
+                    file_id,
+                    sealed_bytes.as_ptr(),
+                    sealed_bytes.len(),
+                    &mut bytes_written as *mut u64,
+                )
+            };
+
+            if status != SgxStatus::Success {
+                return Err(StorageError::Io(format!(
+                    "OCALL append failed: {:?}",
+                    status
+                )));
+            }
+
+            Ok(bytes_written)
+        }
     }
 
     fn sync(&mut self, file_id: FileId) -> Result<(), StorageError> {
@@ -436,98 +484,5 @@ pub unsafe extern "C" fn db_get(
             println!("[Enclave] Get failed: {:?}", e);
             SgxStatus::Unexpected
         }
-    }
-}
-
-/// Test SGX sealing in simulation mode
-#[no_mangle]
-pub extern "C" fn test_seal() -> SgxStatus {
-    println!("[Enclave] Testing SGX seal/unseal...");
-
-    // Simple test data
-    let test_data: Vec<u8> = vec![1, 2, 3, 4, 5];
-    println!("[Enclave] Original data: {:?}", test_data);
-
-    // Step 1: Serialize using opaque encoding (required for SGX sealing)
-    println!("[Enclave] Serializing with opaque::encode...");
-    let encoded = match opaque::encode(&test_data) {
-        Some(e) => {
-            println!("[Enclave] ✓ Encoded to {} bytes", e.len());
-            e
-        }
-        None => {
-            println!("[Enclave] ✗ Encoding FAILED");
-            return SgxStatus::Unexpected;
-        }
-    };
-
-    // Step 2: Seal the encoded bytes
-    println!("[Enclave] Attempting to seal...");
-    let sealed = match SealedData::<[u8]>::seal(encoded.as_slice(), None::<&[u8]>) {
-        Ok(s) => {
-            println!("[Enclave] ✓ Seal successful!");
-            s
-        }
-        Err(e) => {
-            println!("[Enclave] ✗ Seal FAILED: {:?}", e);
-            return SgxStatus::Unexpected;
-        }
-    };
-
-    // Convert to bytes
-    println!("[Enclave] Converting to bytes...");
-    let sealed_bytes = match sealed.into_bytes() {
-        Ok(b) => {
-            println!("[Enclave] ✓ Converted to {} bytes", b.len());
-            b
-        }
-        Err(e) => {
-            println!("[Enclave] ✗ into_bytes FAILED: {:?}", e);
-            return SgxStatus::Unexpected;
-        }
-    };
-
-    // Try to unseal
-    println!("[Enclave] Attempting to unseal...");
-    let unsealed = match UnsealedData::<[u8]>::unseal_from_bytes(sealed_bytes) {
-        Ok(u) => {
-            println!("[Enclave] ✓ Unseal successful!");
-            u
-        }
-        Err(e) => {
-            println!("[Enclave] ✗ Unseal FAILED: {:?}", e);
-            return SgxStatus::Unexpected;
-        }
-    };
-
-    // Step 4: Decode the unsealed bytes
-    let plaintext = unsealed.to_plaintext();
-    println!(
-        "[Enclave] Decoding unsealed data ({} bytes)...",
-        plaintext.len()
-    );
-
-    let decoded: Vec<u8> = match opaque::decode(plaintext) {
-        Some(d) => {
-            println!("[Enclave] ✓ Decoded successfully");
-            d
-        }
-        None => {
-            println!("[Enclave] ✗ Decoding FAILED");
-            return SgxStatus::Unexpected;
-        }
-    };
-
-    println!("[Enclave] Decoded data: {:?}", decoded);
-
-    if decoded == test_data {
-        println!("[Enclave] ✓✓✓ SUCCESS! Seal/unseal works in simulation mode!");
-        SgxStatus::Success
-    } else {
-        println!(
-            "[Enclave] ✗ Data mismatch! Expected {:?}, got {:?}",
-            test_data, decoded
-        );
-        SgxStatus::Unexpected
     }
 }

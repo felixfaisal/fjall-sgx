@@ -26,7 +26,8 @@ name = "helloworld"
 crate-type = ["staticlib"]
 
 [features]
-default = []
+default = ["sw-mode"]  # Default to simulation mode
+sw-mode = []  # Flag for simulation mode (no hardware sealing)
 
 [target.'cfg(not(target_vendor = "teaclave"))'.dependencies]
 sgx_types = { git = "https://github.com/apache/incubator-teaclave-sgx-sdk.git" }

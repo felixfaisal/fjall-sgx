@@ -96,8 +96,6 @@ extern "C" {
         len: usize,
     ) -> SgxStatus;
 
-    fn test_seal(eid: EnclaveId, retval: *mut SgxStatus) -> SgxStatus;
-
     fn db_init(eid: EnclaveId, retval: *mut SgxStatus) -> SgxStatus;
 
     fn db_put(
@@ -383,20 +381,6 @@ fn main() {
             return;
         }
     };
-
-    // Test SGX sealing first
-    info!("\n=== Testing SGX Sealing ===");
-    let mut retval = SgxStatus::Success;
-    let result = unsafe { test_seal(enclave.eid(), &mut retval) };
-
-    match result {
-        SgxStatus::Success => info!("[Host] ✓ SGX sealing test passed!"),
-        _ => {
-            error!("[Host] ✗ SGX sealing test FAILED: {}", result.as_str());
-            error!("[Host] Sealing doesn't work in simulation mode - will need to use manual encryption");
-            return;
-        }
-    }
 
     // Test database operations
     info!("\n=== Testing Database Operations ===");
