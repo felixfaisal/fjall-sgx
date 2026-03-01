@@ -123,6 +123,11 @@ extern "C" {
 /// Create a new file and return its file_id
 #[no_mangle]
 pub extern "C" fn ocall_create_file(file_id: *mut u64) -> SgxStatus {
+    println!(
+        "[Host] ocall_create_file called, file_id ptr: {:p}",
+        file_id
+    );
+
     let mut store = match FILE_STORAGE.lock() {
         Ok(store) => store,
         Err(e) => {
@@ -133,7 +138,12 @@ pub extern "C" fn ocall_create_file(file_id: *mut u64) -> SgxStatus {
 
     let new_file_id = store.create_file();
     unsafe {
+        println!(
+            "[Host] Writing file_id={} to pointer {:p}",
+            new_file_id, file_id
+        );
         *file_id = new_file_id;
+        println!("[Host] After write, value at pointer: {}", *file_id);
     }
 
     println!("[Host] Created file with ID: {}", new_file_id);

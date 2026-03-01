@@ -208,8 +208,17 @@ impl StorageReader for SgxOcallStorage {
 impl StorageWriter for SgxOcallStorage {
     fn create_file(&mut self) -> Result<FileId, StorageError> {
         let mut file_id: u64 = 0;
+        let file_id_ptr = &mut file_id as *mut u64;
 
-        let status = unsafe { ocall_create_file(&mut file_id as *mut u64) };
+        println!(
+            "[Enclave] Calling ocall_create_file with ptr: {:p}",
+            file_id_ptr
+        );
+        let status = unsafe { ocall_create_file(file_id_ptr) };
+        println!(
+            "[Enclave] After OCALL, file_id={}, status={:?}",
+            file_id, status
+        );
 
         if status != SgxStatus::Success {
             return Err(StorageError::Io(format!(
