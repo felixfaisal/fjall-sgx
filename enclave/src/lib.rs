@@ -21,6 +21,7 @@
 #[cfg(not(target_vendor = "teaclave"))]
 #[macro_use]
 extern crate sgx_tstd as std;
+extern crate sgx_serialize;
 extern crate sgx_trts;
 extern crate sgx_tseal;
 extern crate sgx_types;
@@ -34,6 +35,7 @@ use std::vec::Vec;
 use fjall_sgx::db::{Db, DbConfig};
 use fjall_sgx_storage::{FileId, StorageError, StorageReader, StorageWriter};
 
+use sgx_serialize::opaque;
 use sgx_tseal::seal::*;
 use sgx_types::*;
 use std::sync::Mutex;
@@ -443,12 +445,25 @@ pub extern "C" fn test_seal() -> SgxStatus {
     println!("[Enclave] Testing SGX seal/unseal...");
 
     // Simple test data
-    let test_data: [u8; 5] = [1, 2, 3, 4, 5];
+    let test_data: Vec<u8> = vec![1, 2, 3, 4, 5];
     println!("[Enclave] Original data: {:?}", test_data);
 
-    // Try to seal
+    // Step 1: Serialize using opaque encoding (required for SGX sealing)
+    println!("[Enclave] Serializing with opaque::encode...");
+    let encoded = match opaque::encode(&test_data) {
+        Some(e) => {
+            println!("[Enclave] ✓ Encoded to {} bytes", e.len());
+            e
+        }
+        None => {
+            println!("[Enclave] ✗ Encoding FAILED");
+            return SgxStatus::Unexpected;
+        }
+    };
+
+    // Step 2: Seal the encoded bytes
     println!("[Enclave] Attempting to seal...");
-    let sealed = match SealedData::<[u8]>::seal(&test_data, None::<&[u8]>) {
+    let sealed = match SealedData::<[u8]>::seal(encoded.as_slice(), None::<&[u8]>) {
         Ok(s) => {
             println!("[Enclave] ✓ Seal successful!");
             s
@@ -485,17 +500,33 @@ pub extern "C" fn test_seal() -> SgxStatus {
         }
     };
 
-    // Verify data
+    // Step 4: Decode the unsealed bytes
     let plaintext = unsealed.to_plaintext();
-    println!("[Enclave] Unsealed data: {:?}", plaintext);
+    println!(
+        "[Enclave] Decoding unsealed data ({} bytes)...",
+        plaintext.len()
+    );
 
-    if plaintext == &test_data {
+    let decoded: Vec<u8> = match opaque::decode(plaintext) {
+        Some(d) => {
+            println!("[Enclave] ✓ Decoded successfully");
+            d
+        }
+        None => {
+            println!("[Enclave] ✗ Decoding FAILED");
+            return SgxStatus::Unexpected;
+        }
+    };
+
+    println!("[Enclave] Decoded data: {:?}", decoded);
+
+    if decoded == test_data {
         println!("[Enclave] ✓✓✓ SUCCESS! Seal/unseal works in simulation mode!");
         SgxStatus::Success
     } else {
         println!(
             "[Enclave] ✗ Data mismatch! Expected {:?}, got {:?}",
-            test_data, plaintext
+            test_data, decoded
         );
         SgxStatus::Unexpected
     }
