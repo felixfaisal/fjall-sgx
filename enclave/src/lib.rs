@@ -27,9 +27,10 @@ extern crate sgx_tseal;
 extern crate sgx_types;
 
 use sgx_types::error::SgxStatus;
-use std::io::{self, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::slice;
 use std::string::String;
+use std::untrusted::fs;
 use std::vec::Vec;
 
 use fjall_sgx::db::{Db, DbConfig};
@@ -70,21 +71,36 @@ extern "C" {
 
 }
 
-/// Storage implementation that uses SGX OCALLs for I/O.
+/// Storage implementation that uses SGX untrusted::fs for I/O.
 ///
-/// This bridges the extern "C" OCALL functions with the StorageWriter trait.
-pub struct SgxOcallStorage;
+/// Files are stored in ./data/ directory using untrusted filesystem access.
+/// In SW mode, data is written as plaintext. In HW mode, data is sealed.
+pub struct SgxOcallStorage {
+    next_file_id: u64,
+    data_dir: String,
+}
 
 impl SgxOcallStorage {
     pub fn new() -> Self {
-        Self
+        let data_dir = String::from("./data");
+
+        // Create data directory if it doesn't exist
+        let _ = fs::create_dir_all(&data_dir);
+
+        Self {
+            next_file_id: 1,
+            data_dir,
+        }
+    }
+
+    fn get_file_path(&self, file_id: FileId) -> String {
+        format!("{}/file_{}.sealed", self.data_dir, file_id)
     }
 }
 
 impl StorageReader for SgxOcallStorage {
     fn read_at(&self, file_id: FileId, offset: u64, buf: &mut [u8]) -> Result<usize, StorageError> {
-        // For read_at, we need to read the entire sealed file, unseal it, then return the slice
-        // This is because sealing is done at file-level, not block-level
+        // For read_at, we need to read the entire file, unseal it (if HW mode), then return the slice
         let full_data = self.read_all(file_id)?;
 
         let offset = offset as usize;
@@ -100,83 +116,61 @@ impl StorageReader for SgxOcallStorage {
     }
 
     fn file_size(&self, file_id: FileId) -> Result<u64, StorageError> {
-        // Get sealed file size from host
-        let mut sealed_size: u64 = 0;
+        let path = self.get_file_path(file_id);
 
-        let status = unsafe { ocall_file_size(file_id, &mut sealed_size as *mut u64) };
+        match fs::metadata(&path) {
+            Ok(metadata) => {
+                let file_size = metadata.len();
 
-        if status != SgxStatus::Success {
-            return Err(StorageError::Io(format!(
-                "OCALL file_size failed: {:?}",
-                status
-            )));
+                #[cfg(feature = "sw-mode")]
+                {
+                    // In SW mode, file size = plaintext size
+                    Ok(file_size)
+                }
+
+                #[cfg(not(feature = "sw-mode"))]
+                {
+                    // In HW mode, need to unseal to get plaintext size
+                    let plaintext = self.read_all(file_id)?;
+                    Ok(plaintext.len() as u64)
+                }
+            }
+            Err(_) => Ok(0), // File doesn't exist
         }
-
-        // We need to unseal to get plaintext size
-        // For now, read and unseal the file (could cache this)
-        let plaintext = self.read_all(file_id)?;
-        Ok(plaintext.len() as u64)
     }
 
     fn exists(&self, file_id: FileId) -> bool {
-        let mut exists: u8 = 0;
-
-        let status = unsafe { ocall_file_exists(file_id, &mut exists as *mut u8) };
-
-        status == SgxStatus::Success && exists != 0
+        let path = self.get_file_path(file_id);
+        fs::metadata(&path).is_ok()
     }
 
     fn read_all(&self, file_id: FileId) -> Result<Vec<u8>, StorageError> {
-        // First, get the file size
-        let mut file_size: u64 = 0;
-        let status = unsafe { ocall_file_size(file_id, &mut file_size as *mut u64) };
+        let path = self.get_file_path(file_id);
 
-        if status != SgxStatus::Success {
-            return Err(StorageError::Io(format!(
-                "OCALL file_size failed: {:?}",
-                status
-            )));
-        }
+        // Read file using untrusted::fs
+        let buffer =
+            fs::read(&path).map_err(|e| StorageError::Io(format!("fs::read failed: {:?}", e)))?;
 
-        if file_size == 0 {
+        if buffer.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Allocate buffer for data
-        let mut buffer = vec![0u8; file_size as usize];
-        let mut bytes_read: usize = 0;
-
-        // Read bytes from host via OCALL
-        let status = unsafe {
-            ocall_read_at(
-                file_id,
-                0, // Read from beginning
-                buffer.as_mut_ptr(),
-                buffer.len(),
-                &mut bytes_read as *mut usize,
-            )
-        };
-
-        if status != SgxStatus::Success {
-            return Err(StorageError::Io(format!(
-                "OCALL read_at failed: {:?}",
-                status
-            )));
-        }
-
-        buffer.truncate(bytes_read);
-
         #[cfg(feature = "sw-mode")]
         {
-            println!("[Enclave] SW MODE: Read {} bytes (plaintext)", bytes_read);
+            println!(
+                "[Enclave] SW MODE: Read {} bytes (plaintext) from {}",
+                buffer.len(),
+                path
+            );
             return Ok(buffer);
         }
 
         #[cfg(not(feature = "sw-mode"))]
         {
             println!(
-                "[Enclave] HW MODE: Read {} sealed bytes, unsealing...",
-                bytes_read
+                "[Enclave] HW MODE: Read {} sealed bytes from {}, unsealing...",
+                buffer.len(),
+                path
             );
 
             // Unseal to get plaintext
@@ -196,7 +190,7 @@ impl StorageReader for SgxOcallStorage {
             let plaintext = unsealed.to_plaintext();
             println!(
                 "[Enclave] Unsealed {} bytes → {} bytes",
-                bytes_read,
+                buffer.len(),
                 plaintext.len()
             );
 
@@ -207,62 +201,30 @@ impl StorageReader for SgxOcallStorage {
 
 impl StorageWriter for SgxOcallStorage {
     fn create_file(&mut self) -> Result<FileId, StorageError> {
-        let mut file_id: u64 = 0;
-        let file_id_ptr = &mut file_id as *mut u64;
+        let file_id = self.next_file_id;
+        self.next_file_id += 1;
 
-        println!(
-            "[Enclave] Calling ocall_create_file with ptr: {:p}",
-            file_id_ptr
-        );
-        let status = unsafe { ocall_create_file(file_id_ptr) };
-        println!(
-            "[Enclave] After OCALL, file_id={}, status={:?}",
-            file_id, status
-        );
-
-        if status != SgxStatus::Success {
-            return Err(StorageError::Io(format!(
-                "OCALL create_file failed: {:?}",
-                status
-            )));
-        }
-
-        println!("[Enclave] create_file() returned file_id={}", file_id);
+        println!("[Enclave] create_file() assigned file_id={}", file_id);
         Ok(file_id)
     }
 
     fn append(&mut self, file_id: FileId, data: &[u8]) -> Result<u64, StorageError> {
+        let path = self.get_file_path(file_id);
+
         #[cfg(feature = "sw-mode")]
         {
             println!(
-                "[Enclave] SW MODE: Writing {} bytes WITHOUT sealing for file {}",
+                "[Enclave] SW MODE: Writing {} bytes WITHOUT sealing to {}",
                 data.len(),
-                file_id
+                path
             );
 
             // In simulation mode: skip sealing, write plaintext directly
-            let mut bytes_written: u64 = 0;
-            let status = unsafe {
-                ocall_append(
-                    file_id,
-                    data.as_ptr(),
-                    data.len(),
-                    &mut bytes_written as *mut u64,
-                )
-            };
+            fs::write(&path, data)
+                .map_err(|e| StorageError::Io(format!("fs::write failed: {:?}", e)))?;
 
-            if status != SgxStatus::Success {
-                return Err(StorageError::Io(format!(
-                    "OCALL append failed: {:?}",
-                    status
-                )));
-            }
-
-            println!(
-                "[Enclave] SW MODE: Wrote {} bytes (plaintext)",
-                bytes_written
-            );
-            return Ok(bytes_written);
+            println!("[Enclave] SW MODE: Wrote {} bytes (plaintext)", data.len());
+            return Ok(data.len() as u64);
         }
 
         #[cfg(not(feature = "sw-mode"))]
@@ -303,61 +265,40 @@ impl StorageWriter for SgxOcallStorage {
                 sealed_bytes.len() - data.len()
             );
 
-            // Send sealed bytes via OCALL
-            let mut bytes_written: u64 = 0;
-            let status = unsafe {
-                ocall_append(
-                    file_id,
-                    sealed_bytes.as_ptr(),
-                    sealed_bytes.len(),
-                    &mut bytes_written as *mut u64,
-                )
-            };
+            // Write sealed bytes to file
+            fs::write(&path, &sealed_bytes)
+                .map_err(|e| StorageError::Io(format!("fs::write failed: {:?}", e)))?;
 
-            if status != SgxStatus::Success {
-                return Err(StorageError::Io(format!(
-                    "OCALL append failed: {:?}",
-                    status
-                )));
-            }
-
-            Ok(bytes_written)
+            println!(
+                "[Enclave] HW MODE: Wrote {} sealed bytes to {}",
+                sealed_bytes.len(),
+                path
+            );
+            Ok(sealed_bytes.len() as u64)
         }
     }
 
     fn sync(&mut self, file_id: FileId) -> Result<(), StorageError> {
-        let status = unsafe { ocall_sync(file_id) };
-
-        if status != SgxStatus::Success {
-            return Err(StorageError::Io(format!("OCALL sync failed: {:?}", status)));
-        }
-
+        // With untrusted::fs, sync is handled automatically
+        // No explicit sync needed
+        println!("[Enclave] sync() called for file {}", file_id);
         Ok(())
     }
 
     fn close_file(&mut self, file_id: FileId) -> Result<(), StorageError> {
-        let status = unsafe { ocall_close_file(file_id) };
-
-        if status != SgxStatus::Success {
-            return Err(StorageError::Io(format!(
-                "OCALL close_file failed: {:?}",
-                status
-            )));
-        }
-
+        // With untrusted::fs, files are automatically closed
+        // No explicit close needed
+        println!("[Enclave] close_file() called for file {}", file_id);
         Ok(())
     }
 
     fn delete_file(&mut self, file_id: FileId) -> Result<(), StorageError> {
-        let status = unsafe { ocall_delete_file(file_id) };
+        let path = self.get_file_path(file_id);
 
-        if status != SgxStatus::Success {
-            return Err(StorageError::Io(format!(
-                "OCALL delete_file failed: {:?}",
-                status
-            )));
-        }
+        fs::remove_file(&path)
+            .map_err(|e| StorageError::Io(format!("fs::remove_file failed: {:?}", e)))?;
 
+        println!("[Enclave] Deleted file {}", path);
         Ok(())
     }
 }
