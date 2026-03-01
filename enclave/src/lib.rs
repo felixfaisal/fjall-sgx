@@ -310,9 +310,9 @@ impl StorageWriter for SgxOcallStorage {
 pub extern "C" fn db_init() -> SgxStatus {
     let ocall_storage = SgxOcallStorage::new();
 
-    // Use small memtable for testing (will flush to disk quickly)
+    // Use very small memtable for testing (will flush to disk quickly)
     let config = DbConfig {
-        memtable_size_limit: 512, // 512 bytes - triggers flush quickly for testing
+        memtable_size_limit: 200, // 200 bytes - triggers flush very quickly for testing
         ..DbConfig::default()
     };
 

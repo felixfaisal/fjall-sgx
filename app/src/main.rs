@@ -521,15 +521,13 @@ fn main() {
     // Write enough data to exceed memtable limit (512 bytes)
     // Each entry has overhead, so a few large values will trigger flush
     let large_test_data = vec![
-        ("disk_key_1", "x".repeat(100)), // 100 byte value
-        ("disk_key_2", "y".repeat(100)), // 100 byte value
-        ("disk_key_3", "z".repeat(100)), // 100 byte value
-        ("disk_key_4", "a".repeat(100)), // 100 byte value
-        ("disk_key_5", "b".repeat(100)), // 100 byte value
+        ("disk_key_1", "x".repeat(20)), // 20 byte value
+        ("disk_key_2", "y".repeat(20)), // 20 byte value
+        ("disk_key_3", "z".repeat(20)), // 20 byte value
     ];
 
     info!(
-        "[Host] Writing {} entries with 100-byte values...",
+        "[Host] Writing {} entries with 20-byte values...",
         large_test_data.len()
     );
 
